@@ -18,3 +18,5 @@ other-models
 Before installing v0.2.0, disable and remove the v0.1.x plugin configuration and binary. Change private Cursor auth files from `"type":"cursor-native"` to `"type":"cursor-provider"`, or log in again through `/v0/management/cursor-provider-auth-url`. Never publish or attach those auth files to an issue.
 
 Do not load both plugin versions in one CLIProxyAPI process.
+
+CPAMC keeps the Plugin sidebar in page memory. After replacing the plugin ID, use **Refresh All** or perform a full page reload and sign in again. Until that refresh, an already-open management tab can still show the stale `#/plugin-pages/cliproxyapi-cursor-native/0` route even though the backend only registers `cliproxyapi-cursor-provider`.
