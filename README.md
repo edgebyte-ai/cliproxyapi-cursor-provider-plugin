@@ -11,6 +11,7 @@ Current target capabilities:
 - normalized `reasoning_effort` model families;
 - `resource_exhausted`, reset metadata and retry/cooldown propagation;
 - `cursor-native` and `other-models` quota groups through a management route.
+- a plugin-owned browser editor for each account's priority, prefix, allow rules, and deny rules.
 
 The plugin is AGPL-3.0 licensed. Credentials belong in CLIProxyAPI's private auth directory and must never be committed.
 

@@ -90,20 +90,17 @@ curl -sS \
 
 Repeat for the second Cursor account. The plugin writes separate `0600` auth JSON files under `auth-dir`. Never paste access or refresh tokens into `config.yaml`.
 
-Set each account's policy through the plugin's authenticated Management API. This updates the private source auth file without returning or logging its tokens:
+Open **Cursor Quota** from the management sidebar to edit each account's priority, prefix, allowed-model rules, and denied-model rules. The editor has no built-in policy presets and never returns or displays account tokens.
+
+The same operation is available through the plugin's authenticated Management API:
 
 ```sh
 curl -sS -X PATCH \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
-  "http://127.0.0.1:8317/v0/management/plugins/cursor-provider/account-policy?auth_index=$AUTH_INDEX" \
-  -d '{"priority":10,"prefix":"","allowed_models":["cursor-grok-*","composer-*","*fable*"],"denied_models":["*-fast"]}'
+  "http://127.0.0.1:8317/v0/management/auth-files/fields" \
+  -d '{"name":"cursor-account.json","priority":0,"prefix":"","allowed_models":[],"denied_models":[]}'
 ```
-
-Recommended account policy for this deployment:
-
-- Cursor Account 1: priority 10; allow `cursor-grok-*`, `composer-*`, `*fable*`; deny `*-fast`.
-- Cursor Account 2: priority 0; deny `gpt-*`, `cursor-gpt-*`, `openai-*`, `*-fast`.
 
 ## Verification
 

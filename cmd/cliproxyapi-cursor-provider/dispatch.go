@@ -106,17 +106,14 @@ type hostAuthGetResponse struct {
 	JSON json.RawMessage `json:"json"`
 }
 
-type hostAuthSaveRequest struct {
-	HostCallbackID string          `json:"host_callback_id,omitempty"`
-	Name           string          `json:"name"`
-	JSON           json.RawMessage `json:"json"`
-}
-
-type accountPolicyUpdate struct {
-	Prefix        *string   `json:"prefix,omitempty"`
-	Priority      *int      `json:"priority,omitempty"`
-	AllowedModels *[]string `json:"allowed_models,omitempty"`
-	DeniedModels  *[]string `json:"denied_models,omitempty"`
+type accountPolicyResponse struct {
+	AuthIndex     string   `json:"auth_index"`
+	Name          string   `json:"name"`
+	Label         string   `json:"label"`
+	Prefix        string   `json:"prefix"`
+	Priority      int      `json:"priority"`
+	AllowedModels []string `json:"allowed_models"`
+	DeniedModels  []string `json:"denied_models"`
 }
 
 func dispatch(method string, request []byte) (any, error) {
@@ -213,7 +210,7 @@ func dispatch(method string, request []byte) (any, error) {
 		return rpcManagementRegistrationResponse{
 			Routes: []rpcManagementRoute{
 				{Method: http.MethodGet, Path: "/plugins/cursor-provider/quota", Description: "Cursor quota groups for one auth_index"},
-				{Method: http.MethodPatch, Path: "/plugins/cursor-provider/account-policy", Description: "Update one Cursor account model policy and priority"},
+				{Method: http.MethodGet, Path: "/plugins/cursor-provider/account-policy", Description: "Read one Cursor account model policy and priority"},
 			},
 			Resources: []rpcResourceRoute{{Path: "/quota", Menu: "Cursor Quota", Description: "Cursor account quota groups"}},
 		}, nil
@@ -242,8 +239,8 @@ func handleManagement(ctx context.Context, req rpcManagementRequest) (pluginapi.
 			Body: []byte(cursorQuotaPage),
 		}, nil
 	}
-	if req.Method == http.MethodPatch && strings.HasSuffix(req.Path, "/plugins/cursor-provider/account-policy") {
-		return updateAccountPolicy(req)
+	if req.Method == http.MethodGet && strings.HasSuffix(req.Path, "/plugins/cursor-provider/account-policy") {
+		return getAccountPolicy(req)
 	}
 	if req.Method != http.MethodGet || !strings.HasSuffix(req.Path, "/plugins/cursor-provider/quota") {
 		return pluginapi.ManagementResponse{StatusCode: http.StatusNotFound, Body: []byte(`{"error":"not found"}`)}, nil
@@ -260,9 +257,12 @@ func handleManagement(ctx context.Context, req rpcManagementRequest) (pluginapi.
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return pluginapi.ManagementResponse{}, err
 	}
-	var storage provider.AuthStorage
-	if err := json.Unmarshal(response.JSON, &storage); err != nil {
-		return pluginapi.ManagementResponse{}, err
+	storage, ok := decodeCursorAuthStorage(response.JSON)
+	if !ok {
+		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"auth_index is not a Cursor credential"}`)}, nil
+	}
+	if strings.TrimSpace(storage.AccessToken) == "" {
+		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"Cursor credential has no access token"}`)}, nil
 	}
 	quota, err := pluginService.Quota(ctx, storage)
 	if err != nil {
@@ -272,7 +272,7 @@ func handleManagement(ctx context.Context, req rpcManagementRequest) (pluginapi.
 	return pluginapi.ManagementResponse{StatusCode: http.StatusOK, Headers: http.Header{"Content-Type": []string{"application/json"}}, Body: body}, nil
 }
 
-func updateAccountPolicy(req rpcManagementRequest) (pluginapi.ManagementResponse, error) {
+func getAccountPolicy(req rpcManagementRequest) (pluginapi.ManagementResponse, error) {
 	authIndex := strings.TrimSpace(req.Query.Get("auth_index"))
 	if authIndex == "" {
 		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"auth_index is required"}`)}, nil
@@ -285,73 +285,56 @@ func updateAccountPolicy(req rpcManagementRequest) (pluginapi.ManagementResponse
 	if err := json.Unmarshal(raw, &current); err != nil {
 		return pluginapi.ManagementResponse{}, err
 	}
-	if strings.TrimSpace(current.Name) == "" || !strings.HasSuffix(strings.ToLower(current.Name), ".json") {
-		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"Cursor auth has no writable source file"}`)}, nil
+	storage, ok := decodeCursorAuthStorage(current.JSON)
+	if !ok {
+		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"auth_index is not a Cursor credential"}`)}, nil
 	}
-	var storage provider.AuthStorage
-	if err := json.Unmarshal(current.JSON, &storage); err != nil {
-		return pluginapi.ManagementResponse{}, err
-	}
-	var update accountPolicyUpdate
-	if err := json.Unmarshal(req.Body, &update); err != nil {
-		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"invalid policy body"}`)}, nil
-	}
-	if update.Prefix != nil {
-		storage.Prefix = strings.TrimSpace(*update.Prefix)
-	}
-	if update.Priority != nil {
-		storage.Priority = *update.Priority
-	}
-	if update.AllowedModels != nil {
-		storage.AllowedModels = cleanPolicyPatterns(*update.AllowedModels)
-	}
-	if update.DeniedModels != nil {
-		storage.DeniedModels = cleanPolicyPatterns(*update.DeniedModels)
-	}
-	updatedJSON, err := json.Marshal(storage)
-	if err != nil {
-		return pluginapi.ManagementResponse{}, err
-	}
-	if _, err := callHost(pluginabi.MethodHostAuthSave, hostAuthSaveRequest{HostCallbackID: req.HostCallbackID, Name: current.Name, JSON: updatedJSON}); err != nil {
-		return pluginapi.ManagementResponse{}, err
-	}
-	body, _ := json.Marshal(map[string]any{
-		"status": "ok", "auth_index": authIndex, "name": current.Name,
-		"prefix": storage.Prefix, "priority": storage.Priority,
-		"allowed_models": storage.AllowedModels, "denied_models": storage.DeniedModels,
-	})
-	return pluginapi.ManagementResponse{StatusCode: http.StatusOK, Headers: http.Header{"Content-Type": []string{"application/json"}}, Body: body}, nil
+	body, _ := json.Marshal(newAccountPolicyResponse(authIndex, current.Name, storage))
+	return pluginapi.ManagementResponse{
+		StatusCode: http.StatusOK,
+		Headers:    http.Header{"Content-Type": []string{"application/json"}},
+		Body:       body,
+	}, nil
 }
 
-func cleanPolicyPatterns(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.ToLower(strings.TrimSpace(value))
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
+func newAccountPolicyResponse(authIndex, name string, storage provider.AuthStorage) accountPolicyResponse {
+	return accountPolicyResponse{
+		AuthIndex: authIndex, Name: name, Label: storage.Label,
+		Prefix: storage.Prefix, Priority: storage.Priority,
+		AllowedModels: append([]string{}, storage.AllowedModels...),
+		DeniedModels:  append([]string{}, storage.DeniedModels...),
 	}
-	return out
+}
+
+func decodeCursorAuthStorage(raw json.RawMessage) (provider.AuthStorage, bool) {
+	var storage provider.AuthStorage
+	if err := json.Unmarshal(raw, &storage); err != nil {
+		return provider.AuthStorage{}, false
+	}
+	if !strings.EqualFold(strings.TrimSpace(storage.Type), provider.ProviderID) {
+		return provider.AuthStorage{}, false
+	}
+	return storage, true
 }
 
 const cursorQuotaPage = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cursor Quota</title><style>
-body{font:14px system-ui;background:#111827;color:#e5e7eb;margin:0;padding:28px}main{max-width:960px;margin:auto}h1{margin:0 0 8px}.hint{color:#9ca3af;margin-bottom:18px}.controls{display:flex;gap:10px;margin-bottom:22px}input,button{font:inherit;padding:9px 12px;border-radius:8px;border:1px solid #374151;background:#1f2937;color:#fff}input{flex:1}button{cursor:pointer;background:#2563eb}.grid{display:grid;gap:16px}.card{background:#1f2937;border:1px solid #374151;border-radius:12px;padding:18px}.title{display:flex;justify-content:space-between;margin-bottom:14px}.quota{display:grid;grid-template-columns:160px 1fr 70px;align-items:center;gap:12px;margin:12px 0}.bar{height:10px;background:#374151;border-radius:99px;overflow:hidden}.fill{height:100%;background:#22c55e}.danger{background:#ef4444}.error{color:#fca5a5;white-space:pre-wrap}
+body{font:14px system-ui;background:#111827;color:#e5e7eb;margin:0;padding:28px}main{max-width:1060px;margin:auto}h1{margin:0 0 8px}.hint,.field-hint{color:#9ca3af}.hint{margin-bottom:18px}.controls{display:flex;gap:10px;margin-bottom:22px}input,textarea,button{font:inherit;padding:9px 12px;border-radius:8px;border:1px solid #374151;background:#111827;color:#fff;box-sizing:border-box}input{min-width:0}button{cursor:pointer;background:#2563eb}button:disabled{cursor:not-allowed;opacity:.55}.grid{display:grid;gap:16px}.card{background:#1f2937;border:1px solid #374151;border-radius:12px;padding:18px}.title{display:flex;justify-content:space-between;gap:12px;margin-bottom:14px}.identity{display:grid;gap:3px}.identity small{color:#9ca3af}.quota{display:grid;grid-template-columns:160px 1fr 70px;align-items:center;gap:12px;margin:12px 0}.bar{height:10px;background:#374151;border-radius:99px;overflow:hidden}.fill{height:100%;background:#22c55e}.danger{background:#ef4444}.policy{border-top:1px solid #374151;margin-top:18px;padding-top:18px}.policy h2{font-size:16px;margin:0 0 14px}.policy-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.field{display:grid;gap:6px}.field.full{grid-column:1/-1}.field input,.field textarea{width:100%}.field textarea{min-height:92px;resize:vertical;line-height:1.45}.policy-actions{display:flex;align-items:center;gap:12px;margin-top:14px}.status{color:#86efac}.error{color:#fca5a5;white-space:pre-wrap}@media(max-width:720px){body{padding:16px}.controls{flex-direction:column}.policy-grid{grid-template-columns:1fr}.quota{grid-template-columns:110px 1fr 58px}}
 </style></head><body><main><h1>Cursor Quota</h1><div class="hint">Management key stays in page memory and is sent only to this CLIProxyAPI origin.</div>
 <div class="controls"><input id="key" type="password" autocomplete="off" placeholder="Management key"><button id="load">Load quotas</button></div><div id="out" class="grid"></div></main>
 <script>
-const out=document.getElementById('out'),key=document.getElementById('key'),storageKey='cliproxyapi.cursor-provider.management-key';
+const out=document.getElementById('out'),key=document.getElementById('key'),storageKey='cliproxyapi.cursor-provider.management-key',policyPath='/v0/management/plugins/cursor-provider/account-policy';
+let accounts=[];
 key.value=sessionStorage.getItem(storageKey)||'';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(path){const r=await fetch(path,{headers:{Authorization:'Bearer '+key.value},cache:'no-store'});if(r.status===401){sessionStorage.removeItem(storageKey);key.value=''}if(!r.ok)throw new Error('HTTP '+r.status+' '+await r.text());return r.json()}
-async function load(){if(!key.value){out.innerHTML='<div class="error">Enter the management key.</div>';return}sessionStorage.setItem(storageKey,key.value);out.innerHTML='Loading…';try{const auth=await api('/v0/management/auth-files');const rows=(auth.files||[]).filter(x=>x.type==='cursor');const results=await Promise.all(rows.map(async a=>{try{return{a,q:await api('/v0/management/plugins/cursor-provider/quota?auth_index='+encodeURIComponent(a.auth_index))}}catch(e){return{a,e}}}));out.innerHTML=results.map(({a,q,e})=>{if(e)return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong></div><div class="error">'+esc(e.message)+'</div></section>';return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong><span>P'+esc(a.priority||0)+'</span></div>'+q.quota.map(x=>{const used=Number(x.usedPercent);const remain=Number.isFinite(used)?Math.max(0,100-used):0;return '<div class="quota"><span>'+esc(x.key)+'</span><div class="bar"><div class="fill '+(remain<20?'danger':'')+'" style="width:'+remain+'%"></div></div><strong>'+remain.toFixed(1)+'%</strong></div>'}).join('')+'</section>'}).join('')}catch(e){out.innerHTML='<div class="error">'+esc(e.message)+'</div>'}}
+async function api(path,options={}){const headers={Authorization:'Bearer '+key.value,...(options.headers||{})};const r=await fetch(path,{...options,headers,cache:'no-store'});if(r.status===401){sessionStorage.removeItem(storageKey);key.value=''}if(!r.ok)throw new Error('HTTP '+r.status+' '+await r.text());return r.json()}
+const rules=v=>(Array.isArray(v)?v:[]).join('\n');
+const parseRules=v=>{const seen=new Set;return String(v||'').split(/\r?\n/).map(x=>x.trim().toLowerCase()).filter(x=>x&&!seen.has(x)&&(seen.add(x),true))};
+function quotaRows(q){if(q?.error)return '<div class="error">'+esc(q.error)+'</div>';return (q?.quota||[]).map(x=>{const used=Number(x.usedPercent),remain=Number.isFinite(used)?Math.max(0,100-used):0;return '<div class="quota"><span>'+esc(x.key)+'</span><div class="bar"><div class="fill '+(remain<20?'danger':'')+'" style="width:'+remain+'%"></div></div><strong>'+remain.toFixed(1)+'%</strong></div>'}).join('')}
+function card(x,i){const a=x.a,p=x.p;if(p?.error)return '<section class="card"><div class="title"><div class="identity"><strong>'+esc(a.label||a.name)+'</strong><small>'+esc(a.name)+'</small></div></div>'+quotaRows(x.q)+'<div class="error">'+esc(p.error)+'</div></section>';return '<section class="card"><div class="title"><div class="identity"><strong>'+esc(p.label||a.label||a.name)+'</strong><small>'+esc(p.name||a.name)+'</small></div><span>P'+esc(p.priority)+'</span></div>'+quotaRows(x.q)+'<div class="policy"><h2>Account policy</h2><div class="policy-grid"><label class="field"><span>Priority</span><input id="priority-'+i+'" type="number" step="1" value="'+esc(p.priority)+'"><span class="field-hint">Higher values are selected first.</span></label><label class="field"><span>Model prefix</span><input id="prefix-'+i+'" value="'+esc(p.prefix)+'"><span class="field-hint">Leave empty for unprefixed model names.</span></label><label class="field"><span>Allowed model rules</span><textarea id="allowed-'+i+'" spellcheck="false">'+esc(rules(p.allowed_models))+'</textarea><span class="field-hint">One rule per line. Empty means all models are allowed before deny rules.</span></label><label class="field"><span>Denied model rules</span><textarea id="denied-'+i+'" spellcheck="false">'+esc(rules(p.denied_models))+'</textarea><span class="field-hint">One rule per line. Deny rules take precedence. * is supported.</span></label></div><div class="policy-actions"><button id="save-'+i+'" onclick="savePolicy('+i+')">Save account policy</button><span id="status-'+i+'" class="status"></span></div></div></section>'}
+async function load(){if(!key.value){out.innerHTML='<div class="error">Enter the management key.</div>';return}sessionStorage.setItem(storageKey,key.value);out.innerHTML='Loading…';try{const auth=await api('/v0/management/auth-files'),rows=(auth.files||[]).filter(x=>x.type==='cursor');accounts=await Promise.all(rows.map(async a=>{const query='?auth_index='+encodeURIComponent(a.auth_index);const [q,p]=await Promise.all([api('/v0/management/plugins/cursor-provider/quota'+query).catch(e=>({error:e.message})),api(policyPath+query).catch(e=>({error:e.message}))]);return{a,q,p}}));out.innerHTML=accounts.length?accounts.map(card).join(''):'<div class="error">No Cursor auth files found.</div>'}catch(e){out.innerHTML='<div class="error">'+esc(e.message)+'</div>'}}
+async function savePolicy(i){const x=accounts[i],status=document.getElementById('status-'+i),button=document.getElementById('save-'+i),priority=Number(document.getElementById('priority-'+i).value);if(!Number.isSafeInteger(priority)){status.className='error';status.textContent='Priority must be an integer.';return}button.disabled=true;status.className='status';status.textContent='Saving…';try{await api('/v0/management/auth-files/fields',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:x.p.name,priority,prefix:document.getElementById('prefix-'+i).value,allowed_models:parseRules(document.getElementById('allowed-'+i).value),denied_models:parseRules(document.getElementById('denied-'+i).value)})});status.textContent='Saved. Reloading…';await load()}catch(e){status.className='error';status.textContent=e.message;button.disabled=false}}
 document.getElementById('load').onclick=load;if(key.value)load();
 </script></body></html>`
 
