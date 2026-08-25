@@ -1,0 +1,16 @@
+plugins:
+  enabled: true
+  dir: "plugins"
+  configs:
+    cliproxyapi-cursor-native:
+      enabled: true
+      priority: 100
+      provider_id: "cursor-native"
+      model_prefix: ""
+      model_mode: "normalized"
+      default_reasoning_effort: "high"
+      cursor_base_url: "https://api2.cursor.sh"
+      client_version: "cli-2026.08.11-e8db854"
+      allowed_native_tools: ["mcp_tool_call"]
+      request_timeout_seconds: 300
+      model_cache_ttl_seconds: 600

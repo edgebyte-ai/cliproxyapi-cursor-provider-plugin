@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: go test ./...
+      - name: Race
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build plugin
+        run: make build
+      - name: Verify no credentials are tracked
+        shell: bash
+        run: |
+          if git grep -nE '(access_token|refresh_token)"[[:space:]]*:[[:space:]]*"[^<r]' -- ':!internal/provider/*_test.go'; then
+            echo "credential-like value found in tracked files" >&2
+            exit 1
+          fi

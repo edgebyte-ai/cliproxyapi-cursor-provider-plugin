@@ -1,0 +1,5 @@
+Cursor protocol note
+
+The generated protobuf declarations in internal/pb are produced from an extracted Cursor wire descriptor. The generation process renames only descriptor symbols that collide with Go oneof wrapper identifiers. No field number or wire representation is changed.
+
+This plugin communicates with Cursor over Connect-RPC.

@@ -1,0 +1,343 @@
+package provider
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+)
+
+type collectedTurn struct {
+	Text       string
+	Thinking   string
+	ToolCalls  []toolCall
+	Tokens     int
+	DoneReason string
+}
+
+type toolCall struct {
+	ID   string
+	Name string
+	Args map[string]any
+}
+
+func (s *Service) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
+	storage, err := decodeAuth(req.StorageJSON)
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
+	parsed, err := parseExecutorRequest(req, s.Config())
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
+	if err := ensureModel(parsed.Model); err != nil {
+		return pluginapi.ExecutorResponse{}, &StatusError{Code: "invalid_model", Message: err.Error(), HTTPStatus: http.StatusBadRequest}
+	}
+	model, err := s.resolveModel(ctx, storage, parsed.Model, parsed.Effort)
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
+	events, err := s.runTurn(ctx, storage, model, parsed.Input)
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
+	result, err := collectTurn(events)
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
+	payload, err := nonStreamingPayload(parsed.ResponseFormat, parsed.Model, result, s.now().Unix())
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
+	return pluginapi.ExecutorResponse{Payload: payload, Headers: jsonHeaders(), Metadata: map[string]any{"cursor_model": model, "reasoning_effort": parsed.Effort}}, nil
+}
+
+func (s *Service) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequest, emit func([]byte) error) (http.Header, error) {
+	storage, err := decodeAuth(req.StorageJSON)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := parseExecutorRequest(req, s.Config())
+	if err != nil {
+		return nil, err
+	}
+	model, err := s.resolveModel(ctx, storage, parsed.Model, parsed.Effort)
+	if err != nil {
+		return nil, err
+	}
+	events, err := s.runTurn(ctx, storage, model, parsed.Input)
+	if err != nil {
+		return nil, err
+	}
+	created := s.now().Unix()
+	state := newStreamState(parsed.ResponseFormat, parsed.Model, created)
+	for event := range events {
+		frames, frameErr := state.frames(event)
+		if frameErr != nil {
+			return nil, frameErr
+		}
+		for _, frame := range frames {
+			if err := emit(frame); err != nil {
+				return nil, err
+			}
+		}
+		if event.Type == "done" {
+			if event.Err != nil {
+				return nil, event.Err
+			}
+			break
+		}
+	}
+	headers := make(http.Header)
+	headers.Set("Content-Type", "text/event-stream")
+	headers.Set("Cache-Control", "no-cache")
+	return headers, nil
+}
+
+func (s *Service) CountTokens(_ context.Context, req pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
+	raw := req.OriginalRequest
+	if len(raw) == 0 {
+		raw = req.Payload
+	}
+	// Cursor does not expose a tokenizer endpoint. This deterministic approximation is used only for client preflight.
+	tokens := (len(raw) + 3) / 4
+	payload, _ := json.Marshal(map[string]any{"total_tokens": tokens})
+	return pluginapi.ExecutorResponse{Payload: payload, Headers: jsonHeaders()}, nil
+}
+
+func (s *Service) HttpRequest(context.Context, pluginapi.ExecutorHTTPRequest) (pluginapi.ExecutorHTTPResponse, error) {
+	return pluginapi.ExecutorHTTPResponse{}, &StatusError{Code: "unsupported_http", Message: "Cursor plugin does not proxy arbitrary HTTP requests", HTTPStatus: http.StatusForbidden}
+}
+
+func collectTurn(events <-chan TurnEvent) (collectedTurn, error) {
+	result := collectedTurn{DoneReason: "stop"}
+	for event := range events {
+		switch event.Type {
+		case "text":
+			result.Text += event.Text
+		case "thinking":
+			result.Thinking += event.Text
+		case "tool_call":
+			result.ToolCalls = append(result.ToolCalls, toolCall{ID: event.ToolCallID, Name: event.ToolName, Args: event.ToolArgs})
+		case "usage":
+			result.Tokens = event.Tokens
+		case "done":
+			if event.Err != nil {
+				return collectedTurn{}, event.Err
+			}
+			result.DoneReason = event.DoneReason
+		}
+	}
+	return result, nil
+}
+
+func nonStreamingPayload(format, model string, result collectedTurn, created int64) ([]byte, error) {
+	switch format {
+	case "openai-chat":
+		message := map[string]any{"role": "assistant", "content": nullableText(result.Text)}
+		if result.Thinking != "" {
+			message["reasoning_content"] = result.Thinking
+		}
+		if len(result.ToolCalls) > 0 {
+			message["tool_calls"] = openAIToolCalls(result.ToolCalls)
+		}
+		return json.Marshal(map[string]any{
+			"id": "chatcmpl-" + mustUUID(), "object": "chat.completion", "created": created, "model": model,
+			"choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finishReason(result)}},
+			"usage":   usageBlock(result.Tokens),
+		})
+	case "openai-response":
+		outputs := make([]any, 0, 1+len(result.ToolCalls))
+		if result.Text != "" || result.Thinking != "" {
+			content := []any{map[string]any{"type": "output_text", "text": result.Text, "annotations": []any{}}}
+			outputs = append(outputs, map[string]any{"id": "msg_" + mustUUID(), "type": "message", "status": "completed", "role": "assistant", "content": content})
+		}
+		for _, call := range result.ToolCalls {
+			arguments, _ := json.Marshal(call.Args)
+			outputs = append(outputs, map[string]any{"id": call.ID, "call_id": call.ID, "type": "function_call", "name": call.Name, "arguments": string(arguments), "status": "completed"})
+		}
+		return json.Marshal(map[string]any{
+			"id": "resp_" + mustUUID(), "object": "response", "created_at": created, "status": "completed", "model": model,
+			"output": outputs, "usage": responseUsageBlock(result.Tokens),
+		})
+	case "claude":
+		content := make([]any, 0, 2+len(result.ToolCalls))
+		if result.Thinking != "" {
+			content = append(content, map[string]any{"type": "thinking", "thinking": result.Thinking})
+		}
+		if result.Text != "" {
+			content = append(content, map[string]any{"type": "text", "text": result.Text})
+		}
+		for _, call := range result.ToolCalls {
+			content = append(content, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Name, "input": call.Args})
+		}
+		return json.Marshal(map[string]any{
+			"id": "msg_" + mustUUID(), "type": "message", "role": "assistant", "model": model,
+			"content": content, "stop_reason": map[bool]string{true: "tool_use", false: "end_turn"}[len(result.ToolCalls) > 0],
+			"usage": map[string]any{"input_tokens": 0, "output_tokens": result.Tokens},
+		})
+	default:
+		return nil, fmt.Errorf("unsupported response format %q", format)
+	}
+}
+
+type streamState struct {
+	format  string
+	model   string
+	created int64
+	id      string
+	opened  bool
+	toolIdx int
+}
+
+func newStreamState(format, model string, created int64) *streamState {
+	return &streamState{format: format, model: model, created: created, id: mustUUID()}
+}
+
+func (s *streamState) frames(event TurnEvent) ([][]byte, error) {
+	switch s.format {
+	case "openai-chat":
+		return s.openAIChatFrames(event)
+	case "openai-response":
+		return s.openAIResponseFrames(event)
+	case "claude":
+		return s.claudeFrames(event)
+	default:
+		return nil, fmt.Errorf("unsupported stream format %q", s.format)
+	}
+}
+
+func (s *streamState) openAIChatFrames(event TurnEvent) ([][]byte, error) {
+	frames := make([][]byte, 0, 2)
+	if !s.opened {
+		s.opened = true
+		frames = append(frames, sseData(map[string]any{"id": "chatcmpl-" + s.id, "object": "chat.completion.chunk", "created": s.created, "model": s.model, "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant"}, "finish_reason": nil}}}))
+	}
+	switch event.Type {
+	case "text":
+		frames = append(frames, sseData(chatChunk(s, map[string]any{"content": event.Text}, nil)))
+	case "thinking":
+		frames = append(frames, sseData(chatChunk(s, map[string]any{"reasoning_content": event.Text}, nil)))
+	case "tool_call":
+		arguments, _ := json.Marshal(event.ToolArgs)
+		frames = append(frames, sseData(chatChunk(s, map[string]any{"tool_calls": []any{map[string]any{"index": s.toolIdx, "id": event.ToolCallID, "type": "function", "function": map[string]any{"name": event.ToolName, "arguments": string(arguments)}}}}, nil)))
+		s.toolIdx++
+	case "done":
+		frames = append(frames, sseData(chatChunk(s, map[string]any{}, map[bool]string{true: "tool_calls", false: "stop"}[event.DoneReason == "tool_calls"])), []byte("data: [DONE]\n\n"))
+	}
+	return frames, nil
+}
+
+func (s *streamState) openAIResponseFrames(event TurnEvent) ([][]byte, error) {
+	frames := make([][]byte, 0, 2)
+	responseID := "resp_" + s.id
+	if !s.opened {
+		s.opened = true
+		frames = append(frames, sseEvent("response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": responseID, "object": "response", "status": "in_progress", "model": s.model, "output": []any{}}}))
+	}
+	switch event.Type {
+	case "text":
+		frames = append(frames, sseEvent("response.output_text.delta", map[string]any{"type": "response.output_text.delta", "response_id": responseID, "delta": event.Text}))
+	case "thinking":
+		frames = append(frames, sseEvent("response.reasoning_summary_text.delta", map[string]any{"type": "response.reasoning_summary_text.delta", "response_id": responseID, "delta": event.Text}))
+	case "tool_call":
+		arguments, _ := json.Marshal(event.ToolArgs)
+		frames = append(frames, sseEvent("response.output_item.done", map[string]any{"type": "response.output_item.done", "response_id": responseID, "item": map[string]any{"id": event.ToolCallID, "call_id": event.ToolCallID, "type": "function_call", "name": event.ToolName, "arguments": string(arguments), "status": "completed"}}))
+	case "done":
+		frames = append(frames, sseEvent("response.completed", map[string]any{"type": "response.completed", "response": map[string]any{"id": responseID, "object": "response", "status": "completed", "model": s.model}}), []byte("data: [DONE]\n\n"))
+	}
+	return frames, nil
+}
+
+func (s *streamState) claudeFrames(event TurnEvent) ([][]byte, error) {
+	frames := make([][]byte, 0, 2)
+	if !s.opened {
+		s.opened = true
+		frames = append(frames, sseEvent("message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg_" + s.id, "type": "message", "role": "assistant", "model": s.model, "content": []any{}, "usage": map[string]any{"input_tokens": 0, "output_tokens": 0}}}))
+	}
+	switch event.Type {
+	case "text":
+		frames = append(frames, sseEvent("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": event.Text}}))
+	case "thinking":
+		frames = append(frames, sseEvent("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": event.Text}}))
+	case "tool_call":
+		frames = append(frames, sseEvent("content_block_start", map[string]any{"type": "content_block_start", "index": s.toolIdx + 1, "content_block": map[string]any{"type": "tool_use", "id": event.ToolCallID, "name": event.ToolName, "input": event.ToolArgs}}))
+		s.toolIdx++
+	case "done":
+		frames = append(frames, sseEvent("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": map[bool]string{true: "tool_use", false: "end_turn"}[event.DoneReason == "tool_calls"]}, "usage": map[string]any{"output_tokens": event.Tokens}}), sseEvent("message_stop", map[string]any{"type": "message_stop"}))
+	}
+	return frames, nil
+}
+
+func chatChunk(state *streamState, delta map[string]any, finish any) map[string]any {
+	return map[string]any{"id": "chatcmpl-" + state.id, "object": "chat.completion.chunk", "created": state.created, "model": state.model, "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}}
+}
+
+func sseData(payload any) []byte {
+	raw, _ := json.Marshal(payload)
+	return []byte("data: " + string(raw) + "\n\n")
+}
+
+func sseEvent(name string, payload any) []byte {
+	raw, _ := json.Marshal(payload)
+	return []byte("event: " + name + "\ndata: " + string(raw) + "\n\n")
+}
+
+func openAIToolCalls(calls []toolCall) []any {
+	out := make([]any, 0, len(calls))
+	for _, call := range calls {
+		arguments, _ := json.Marshal(call.Args)
+		out = append(out, map[string]any{"id": call.ID, "type": "function", "function": map[string]any{"name": call.Name, "arguments": string(arguments)}})
+	}
+	return out
+}
+
+func finishReason(result collectedTurn) string {
+	if len(result.ToolCalls) > 0 || result.DoneReason == "tool_calls" {
+		return "tool_calls"
+	}
+	return "stop"
+}
+
+func nullableText(text string) any {
+	if text == "" {
+		return nil
+	}
+	return text
+}
+
+func usageBlock(tokens int) map[string]any {
+	return map[string]any{"prompt_tokens": 0, "completion_tokens": tokens, "total_tokens": tokens}
+}
+
+func responseUsageBlock(tokens int) map[string]any {
+	return map[string]any{"input_tokens": 0, "output_tokens": tokens, "total_tokens": tokens}
+}
+
+func jsonHeaders() http.Header {
+	headers := make(http.Header)
+	headers.Set("Content-Type", "application/json")
+	return headers
+}
+
+func retryAfterSeconds(duration time.Duration) int64 {
+	if duration <= 0 {
+		return 0
+	}
+	seconds := int64(duration / time.Second)
+	if duration%time.Second != 0 {
+		seconds++
+	}
+	return seconds
+}
+
+func errorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.TrimSpace(err.Error())
+}
