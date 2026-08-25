@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "plugins": [
     {
       "id": "cliproxyapi-cursor-native",
@@ -10,51 +10,7 @@
       "repository": "https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin",
       "homepage": "https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin",
       "license": "AGPL-3.0",
-      "tags": ["provider", "cursor", "oauth", "quota", "experimental"],
-      "install": {
-        "type": "direct",
-        "artifacts": [
-          {
-            "goos": "linux",
-            "goarch": "amd64",
-            "url": "https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/releases/download/v0.1.1/cliproxyapi-cursor-native_0.1.1_linux_amd64.zip",
-            "sha256": "24bff7dd3437052769bfceb6b0789137d9d058736c0ae8e1b81fe2a872ec4393",
-            "size": 4778140
-          }
-        ]
-      },
-      "versions": [
-        {
-          "version": "0.1.1",
-          "install": {
-            "type": "direct",
-            "artifacts": [
-              {
-                "goos": "linux",
-                "goarch": "amd64",
-                "url": "https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/releases/download/v0.1.1/cliproxyapi-cursor-native_0.1.1_linux_amd64.zip",
-                "sha256": "24bff7dd3437052769bfceb6b0789137d9d058736c0ae8e1b81fe2a872ec4393",
-                "size": 4778140
-              }
-            ]
-          }
-        },
-        {
-          "version": "0.1.0",
-          "install": {
-            "type": "direct",
-            "artifacts": [
-              {
-                "goos": "linux",
-                "goarch": "amd64",
-                "url": "https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/releases/download/v0.1.0/cliproxyapi-cursor-native_0.1.0_linux_amd64.zip",
-                "sha256": "3663700b61586bee3f1d28c39b999060b976916d9e68cec5ab07376e335bb12e",
-                "size": 4893270
-              }
-            ]
-          }
-        }
-      ]
+      "tags": ["Provider", "Cursor", "OAuth", "Quota", "Experimental"]
     }
   ]
 }
