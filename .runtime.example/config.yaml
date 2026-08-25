@@ -18,10 +18,10 @@ plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cliproxyapi-cursor-native:
+    cliproxyapi-cursor-provider:
       enabled: true
       priority: 100
-      provider_id: "cursor-native"
+      provider_id: "cursor-provider"
       model_prefix: ""
       model_mode: "normalized"
       default_reasoning_effort: "high"

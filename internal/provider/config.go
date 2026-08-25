@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const ProviderID = "cursor-native"
+const ProviderID = "cursor-provider"
 
 type Config struct {
 	Enabled                bool     `yaml:"enabled" json:"enabled"`

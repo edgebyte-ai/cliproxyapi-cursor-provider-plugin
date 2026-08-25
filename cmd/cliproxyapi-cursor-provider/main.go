@@ -47,7 +47,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/internal/provider"
+	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/provider"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 )
 

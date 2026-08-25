@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/internal/pb"
+	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/pb"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 

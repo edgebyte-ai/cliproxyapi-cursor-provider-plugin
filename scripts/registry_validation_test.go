@@ -26,7 +26,7 @@ func TestRegistry(t *testing.T) {
 	if err := json.Unmarshal(raw, &registry); err != nil {
 		t.Fatal(err)
 	}
-	if registry.SchemaVersion != 1 || len(registry.Plugins) != 1 || registry.Plugins[0].ID != "cliproxyapi-cursor-native" || registry.Plugins[0].Version == "" || registry.Plugins[0].Repository == "" {
+	if registry.SchemaVersion != 1 || len(registry.Plugins) != 1 || registry.Plugins[0].ID != "cliproxyapi-cursor-provider" || registry.Plugins[0].Version == "" || registry.Plugins[0].Repository == "" {
 		t.Fatalf("unexpected registry: %+v", registry)
 	}
 }

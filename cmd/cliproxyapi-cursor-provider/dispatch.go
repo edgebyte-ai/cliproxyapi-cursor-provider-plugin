@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/internal/provider"
+	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/provider"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -179,7 +179,7 @@ func dispatch(method string, request []byte) (any, error) {
 		_, _ = callHost(pluginabi.MethodHostLog, map[string]any{
 			"host_callback_id": req.HostCallbackID,
 			"level":            "debug",
-			"message":          fmt.Sprintf("cursor native executor completed model=%s upstream=%s format=%s source=%s payload_bytes=%d", req.Model, resolvedModel, req.Format, req.SourceFormat, len(response.Payload)),
+			"message":          fmt.Sprintf("cursor provider executor completed model=%s upstream=%s format=%s source=%s payload_bytes=%d", req.Model, resolvedModel, req.Format, req.SourceFormat, len(response.Payload)),
 			"fields":           map[string]any{"model": req.Model, "format": req.Format, "source_format": req.SourceFormat, "payload_bytes": len(response.Payload), "error": executeErr != nil},
 		})
 		return response, executeErr
@@ -212,8 +212,8 @@ func dispatch(method string, request []byte) (any, error) {
 	case pluginabi.MethodManagementRegister:
 		return rpcManagementRegistrationResponse{
 			Routes: []rpcManagementRoute{
-				{Method: http.MethodGet, Path: "/plugins/cursor-native/quota", Description: "Cursor native quota groups for one auth_index"},
-				{Method: http.MethodPatch, Path: "/plugins/cursor-native/account-policy", Description: "Update one Cursor account model policy and priority"},
+				{Method: http.MethodGet, Path: "/plugins/cursor-provider/quota", Description: "Cursor quota groups for one auth_index"},
+				{Method: http.MethodPatch, Path: "/plugins/cursor-provider/account-policy", Description: "Update one Cursor account model policy and priority"},
 			},
 			Resources: []rpcResourceRoute{{Path: "/quota", Menu: "Cursor Quota", Description: "Cursor account quota groups"}},
 		}, nil
@@ -242,10 +242,10 @@ func handleManagement(ctx context.Context, req rpcManagementRequest) (pluginapi.
 			Body: []byte(cursorQuotaPage),
 		}, nil
 	}
-	if req.Method == http.MethodPatch && strings.HasSuffix(req.Path, "/plugins/cursor-native/account-policy") {
+	if req.Method == http.MethodPatch && strings.HasSuffix(req.Path, "/plugins/cursor-provider/account-policy") {
 		return updateAccountPolicy(req)
 	}
-	if req.Method != http.MethodGet || !strings.HasSuffix(req.Path, "/plugins/cursor-native/quota") {
+	if req.Method != http.MethodGet || !strings.HasSuffix(req.Path, "/plugins/cursor-provider/quota") {
 		return pluginapi.ManagementResponse{StatusCode: http.StatusNotFound, Body: []byte(`{"error":"not found"}`)}, nil
 	}
 	authIndex := strings.TrimSpace(req.Query.Get("auth_index"))
@@ -347,11 +347,11 @@ body{font:14px system-ui;background:#111827;color:#e5e7eb;margin:0;padding:28px}
 </style></head><body><main><h1>Cursor Quota</h1><div class="hint">Management key stays in page memory and is sent only to this CLIProxyAPI origin.</div>
 <div class="controls"><input id="key" type="password" autocomplete="off" placeholder="Management key"><button id="load">Load quotas</button></div><div id="out" class="grid"></div></main>
 <script>
-const out=document.getElementById('out'),key=document.getElementById('key'),storageKey='cliproxyapi.cursor-native.management-key';
+const out=document.getElementById('out'),key=document.getElementById('key'),storageKey='cliproxyapi.cursor-provider.management-key';
 key.value=sessionStorage.getItem(storageKey)||'';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path){const r=await fetch(path,{headers:{Authorization:'Bearer '+key.value},cache:'no-store'});if(r.status===401){sessionStorage.removeItem(storageKey);key.value=''}if(!r.ok)throw new Error('HTTP '+r.status+' '+await r.text());return r.json()}
-async function load(){if(!key.value){out.innerHTML='<div class="error">Enter the management key.</div>';return}sessionStorage.setItem(storageKey,key.value);out.innerHTML='Loading…';try{const auth=await api('/v0/management/auth-files');const rows=(auth.files||[]).filter(x=>x.type==='cursor-native');const results=await Promise.all(rows.map(async a=>{try{return{a,q:await api('/v0/management/plugins/cursor-native/quota?auth_index='+encodeURIComponent(a.auth_index))}}catch(e){return{a,e}}}));out.innerHTML=results.map(({a,q,e})=>{if(e)return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong></div><div class="error">'+esc(e.message)+'</div></section>';return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong><span>P'+esc(a.priority||0)+'</span></div>'+q.quota.map(x=>{const used=Number(x.usedPercent);const remain=Number.isFinite(used)?Math.max(0,100-used):0;return '<div class="quota"><span>'+esc(x.key)+'</span><div class="bar"><div class="fill '+(remain<20?'danger':'')+'" style="width:'+remain+'%"></div></div><strong>'+remain.toFixed(1)+'%</strong></div>'}).join('')+'</section>'}).join('')}catch(e){out.innerHTML='<div class="error">'+esc(e.message)+'</div>'}}
+async function load(){if(!key.value){out.innerHTML='<div class="error">Enter the management key.</div>';return}sessionStorage.setItem(storageKey,key.value);out.innerHTML='Loading…';try{const auth=await api('/v0/management/auth-files');const rows=(auth.files||[]).filter(x=>x.type==='cursor-provider');const results=await Promise.all(rows.map(async a=>{try{return{a,q:await api('/v0/management/plugins/cursor-provider/quota?auth_index='+encodeURIComponent(a.auth_index))}}catch(e){return{a,e}}}));out.innerHTML=results.map(({a,q,e})=>{if(e)return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong></div><div class="error">'+esc(e.message)+'</div></section>';return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong><span>P'+esc(a.priority||0)+'</span></div>'+q.quota.map(x=>{const used=Number(x.usedPercent);const remain=Number.isFinite(used)?Math.max(0,100-used):0;return '<div class="quota"><span>'+esc(x.key)+'</span><div class="bar"><div class="fill '+(remain<20?'danger':'')+'" style="width:'+remain+'%"></div></div><strong>'+remain.toFixed(1)+'%</strong></div>'}).join('')+'</section>'}).join('')}catch(e){out.innerHTML='<div class="error">'+esc(e.message)+'</div>'}}
 document.getElementById('load').onclick=load;if(key.value)load();
 </script></body></html>`
 
@@ -359,10 +359,10 @@ func pluginRegistration() registration {
 	return registration{
 		SchemaVersion: pluginabi.SchemaVersion,
 		Metadata: pluginapi.Metadata{
-			Name: "Cursor Native Provider", Version: pluginVersion, Author: "edgebyte-ai",
-			GitHubRepository: "https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin",
+			Name: "Cursor Provider", Version: pluginVersion, Author: "edgebyte-ai",
+			GitHubRepository: "https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin",
 			ConfigFields: []pluginapi.ConfigField{
-				{Name: "enabled", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable the Cursor native provider."},
+				{Name: "enabled", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable the Cursor provider."},
 				{Name: "model_prefix", Type: pluginapi.ConfigFieldTypeString, Description: "Prefix added to Cursor model IDs."},
 				{Name: "model_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"raw", "normalized", "both"}, Description: "Cursor model catalog compatibility mode."},
 				{Name: "default_reasoning_effort", Type: pluginapi.ConfigFieldTypeString, Description: "Default effort for normalized model families."},

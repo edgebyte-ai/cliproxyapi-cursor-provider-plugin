@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/internal/provider"
+	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/provider"
 )
 
 var pluginService = provider.New()
