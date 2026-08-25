@@ -29,3 +29,16 @@ docker compose -p cursor-native-plugin-test -f docker-compose.test.yml up -d
 ```
 
 The external Plugin ABI currently preserves HTTP status but not error response headers. Cursor `resource_exhausted` is therefore mapped to HTTP 429 and the computed retry delay is included in the error message; native `Retry-After` response-header propagation requires a future CLIProxyAPI Plugin ABI field.
+
+## Install and publish
+
+- [Remote Linux deployment](docs/deploy-linux.md)
+- [Credential-safe publishing and Plugin Store distribution](docs/publishing.md)
+
+Public Plugin Store registry:
+
+```text
+https://raw.githubusercontent.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/main/plugin-store/registry.json
+```
+
+Release archives contain only the platform plugin library. Cursor credentials are created later inside the target CLIProxyAPI private `auth-dir` and are never part of the release or registry.
