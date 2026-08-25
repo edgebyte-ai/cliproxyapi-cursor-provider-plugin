@@ -30,7 +30,7 @@ install -m 755 cliproxyapi-cursor-native.so /opt/cliproxyapi/plugins/linux/amd64
 Expected v0.1.1 ZIP checksum:
 
 ```text
-24bff7dd3437052769bfceb6b0789137d9d058736c0ae8e1b81fe2a872ec4393
+9cb35ac1cf8d4dc5d724a9665ae6f5412daa2085557844822642009f12150372
 ```
 
 ## CLIProxyAPI configuration
