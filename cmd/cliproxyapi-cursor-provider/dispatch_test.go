@@ -17,7 +17,7 @@ func TestPluginRegistrationName(t *testing.T) {
 }
 
 func TestDecodeCursorAuthStorageRejectsOtherProviders(t *testing.T) {
-	raw := json.RawMessage(`{"type":"codex","access_token":"secret"}`)
+	raw := json.RawMessage(`{"type":"codex"}`)
 	if _, ok := decodeCursorAuthStorage(raw); ok {
 		t.Fatal("decodeCursorAuthStorage() accepted a non-Cursor credential")
 	}
