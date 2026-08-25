@@ -8,7 +8,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const ProviderID = "cursor-provider"
+// ProviderID is deliberately shorter than the plugin ID. It is the auth/provider
+// key shown by CLIProxyAPI in OAuth configuration and Auth Files, while the
+// separately registered plugin remains "cliproxyapi-cursor-provider".
+const ProviderID = "cursor"
 
 type Config struct {
 	Enabled                bool     `yaml:"enabled" json:"enabled"`
