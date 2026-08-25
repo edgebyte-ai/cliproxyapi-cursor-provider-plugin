@@ -199,7 +199,10 @@ func parseTools(value any) ([]*pb.McpToolDefinition, error) {
 		}
 		name := firstNonEmpty(stringValue(definition["name"]), stringValue(tool["name"]))
 		if name == "" {
-			return nil, &StatusError{Code: "invalid_tool", Message: "tool name is required", HTTPStatus: http.StatusBadRequest}
+			// Built-in Responses tools such as web_search may not have a caller-owned
+			// function name. Cursor can only surface MCP-style caller functions, so
+			// skip those capability declarations instead of rejecting the whole turn.
+			continue
 		}
 		schema := definition["parameters"]
 		if schema == nil {

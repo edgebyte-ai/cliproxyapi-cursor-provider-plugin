@@ -186,16 +186,21 @@ func nonStreamingPayload(format, model string, result collectedTurn, created int
 }
 
 type streamState struct {
-	format  string
-	model   string
-	created int64
-	id      string
-	opened  bool
-	toolIdx int
+	format    string
+	model     string
+	created   int64
+	id        string
+	opened    bool
+	toolIdx   int
+	seq       int
+	text      string
+	reasoning string
+	messageID string
+	toolCalls []toolCall
 }
 
 func newStreamState(format, model string, created int64) *streamState {
-	return &streamState{format: format, model: model, created: created, id: mustUUID()}
+	return &streamState{format: format, model: model, created: created, id: mustUUID(), messageID: "msg_" + mustUUID()}
 }
 
 func (s *streamState) frames(event TurnEvent) ([][]byte, error) {
@@ -233,24 +238,55 @@ func (s *streamState) openAIChatFrames(event TurnEvent) ([][]byte, error) {
 }
 
 func (s *streamState) openAIResponseFrames(event TurnEvent) ([][]byte, error) {
-	frames := make([][]byte, 0, 2)
+	frames := make([][]byte, 0, 5)
 	responseID := "resp_" + s.id
 	if !s.opened {
 		s.opened = true
-		frames = append(frames, sseEvent("response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": responseID, "object": "response", "status": "in_progress", "model": s.model, "output": []any{}}}))
+		frames = append(frames,
+			s.responseEvent("response.created", map[string]any{"response": map[string]any{"id": responseID, "object": "response", "created_at": s.created, "status": "in_progress", "model": s.model, "output": []any{}}}),
+			s.responseEvent("response.output_item.added", map[string]any{"output_index": 0, "item": map[string]any{"id": s.messageID, "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}),
+			s.responseEvent("response.content_part.added", map[string]any{"item_id": s.messageID, "output_index": 0, "content_index": 0, "part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}}}),
+		)
 	}
 	switch event.Type {
 	case "text":
-		frames = append(frames, sseEvent("response.output_text.delta", map[string]any{"type": "response.output_text.delta", "response_id": responseID, "delta": event.Text}))
+		s.text += event.Text
+		frames = append(frames, s.responseEvent("response.output_text.delta", map[string]any{"item_id": s.messageID, "output_index": 0, "content_index": 0, "delta": event.Text, "logprobs": []any{}}))
 	case "thinking":
-		frames = append(frames, sseEvent("response.reasoning_summary_text.delta", map[string]any{"type": "response.reasoning_summary_text.delta", "response_id": responseID, "delta": event.Text}))
+		// Cursor exposes thinking deltas, but Responses clients require a complete
+		// reasoning-item lifecycle. Keep them for the terminal response metadata
+		// instead of emitting orphan summary deltas.
+		s.reasoning += event.Text
 	case "tool_call":
+		s.toolCalls = append(s.toolCalls, toolCall{ID: event.ToolCallID, Name: event.ToolName, Args: event.ToolArgs})
 		arguments, _ := json.Marshal(event.ToolArgs)
-		frames = append(frames, sseEvent("response.output_item.done", map[string]any{"type": "response.output_item.done", "response_id": responseID, "item": map[string]any{"id": event.ToolCallID, "call_id": event.ToolCallID, "type": "function_call", "name": event.ToolName, "arguments": string(arguments), "status": "completed"}}))
+		item := map[string]any{"id": event.ToolCallID, "call_id": event.ToolCallID, "type": "function_call", "name": event.ToolName, "arguments": string(arguments), "status": "completed"}
+		frames = append(frames,
+			s.responseEvent("response.output_item.added", map[string]any{"output_index": len(s.toolCalls), "item": item}),
+			s.responseEvent("response.output_item.done", map[string]any{"output_index": len(s.toolCalls), "item": item}),
+		)
 	case "done":
-		frames = append(frames, sseEvent("response.completed", map[string]any{"type": "response.completed", "response": map[string]any{"id": responseID, "object": "response", "status": "completed", "model": s.model}}), []byte("data: [DONE]\n\n"))
+		message := map[string]any{"id": s.messageID, "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": s.text, "annotations": []any{}}}}
+		outputs := []any{message}
+		for _, call := range s.toolCalls {
+			arguments, _ := json.Marshal(call.Args)
+			outputs = append(outputs, map[string]any{"id": call.ID, "call_id": call.ID, "type": "function_call", "name": call.Name, "arguments": string(arguments), "status": "completed"})
+		}
+		frames = append(frames,
+			s.responseEvent("response.output_text.done", map[string]any{"item_id": s.messageID, "output_index": 0, "content_index": 0, "text": s.text, "logprobs": []any{}}),
+			s.responseEvent("response.content_part.done", map[string]any{"item_id": s.messageID, "output_index": 0, "content_index": 0, "part": map[string]any{"type": "output_text", "text": s.text, "annotations": []any{}}}),
+			s.responseEvent("response.output_item.done", map[string]any{"output_index": 0, "item": message}),
+			s.responseEvent("response.completed", map[string]any{"response": map[string]any{"id": responseID, "object": "response", "created_at": s.created, "status": "completed", "model": s.model, "output": outputs, "usage": responseUsageBlock(event.Tokens)}}),
+		)
 	}
 	return frames, nil
+}
+
+func (s *streamState) responseEvent(name string, fields map[string]any) []byte {
+	fields["type"] = name
+	fields["sequence_number"] = s.seq
+	s.seq++
+	return sseEvent(name, fields)
 }
 
 func (s *streamState) claudeFrames(event TurnEvent) ([][]byte, error) {

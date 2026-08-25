@@ -31,3 +31,16 @@ func TestNormalizeToolCallIDRemovesWhitespace(t *testing.T) {
 		t.Fatalf("normalized id = %q", got)
 	}
 }
+
+func TestParseToolsSkipsUnnamedBuiltins(t *testing.T) {
+	tools, err := parseTools([]any{
+		map[string]any{"type": "web_search"},
+		map[string]any{"type": "function", "name": "shell", "parameters": map[string]any{"type": "object"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 1 || tools[0].GetName() != "shell" {
+		t.Fatalf("unexpected tools: %+v", tools)
+	}
+}
