@@ -1,0 +1,7 @@
+/build/
+/dist/
+/.runtime/
+*.so
+*.dll
+*.dylib
+*.test

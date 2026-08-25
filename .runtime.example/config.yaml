@@ -1,0 +1,32 @@
+host: "0.0.0.0"
+port: 8317
+remote-management:
+  allow-remote: true
+  secret-key: "replace-local-management-key"
+  disable-control-panel: false
+auth-dir: "/root/.cli-proxy-api"
+api-keys:
+  - "replace-local-api-key"
+debug: true
+logging-to-file: false
+usage-statistics-enabled: true
+passthrough-headers: true
+request-retry: 0
+max-retry-credentials: 0
+force-model-prefix: false
+plugins:
+  enabled: true
+  dir: "plugins"
+  configs:
+    cliproxyapi-cursor-native:
+      enabled: true
+      priority: 100
+      provider_id: "cursor-native"
+      model_prefix: ""
+      model_mode: "normalized"
+      default_reasoning_effort: "high"
+      cursor_base_url: "https://api2.cursor.sh"
+      client_version: "cli-2026.08.11-e8db854"
+      allowed_native_tools: ["mcp_tool_call"]
+      request_timeout_seconds: 300
+      model_cache_ttl_seconds: 600
