@@ -14,6 +14,13 @@ Current target capabilities:
 
 The plugin is AGPL-3.0 licensed. Credentials belong in CLIProxyAPI's private auth directory and must never be committed.
 
+Naming is intentionally split by responsibility:
+
+- plugin name: `Cursor Provider`;
+- plugin ID and binary: `cliproxyapi-cursor-provider`;
+- provider/auth type and OAuth alias channel: `cursor` (shown as `Cursor` in Auth Files);
+- quota groups: `cursor-native` and `other-models`.
+
 ## Development
 
 The repository includes an isolated test deployment on `127.0.0.1:18317`. It uses a dedicated Docker Compose project, config, auth directory, plugin directory, and log directory, so it does not touch another CLIProxyAPI deployment.
@@ -34,7 +41,6 @@ The external Plugin ABI currently preserves HTTP status but not error response h
 
 - [Remote Linux deployment](docs/deploy-linux.md)
 - [Credential-safe publishing and Plugin Store distribution](docs/publishing.md)
-- [v0.2 naming migration](docs/migration-v0.2.md)
 
 Public Plugin Store registry:
 

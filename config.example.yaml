@@ -5,7 +5,7 @@ plugins:
     cliproxyapi-cursor-provider:
       enabled: true
       priority: 100
-      provider_id: "cursor-provider"
+      provider_id: "cursor"
       model_prefix: ""
       model_mode: "normalized"
       default_reasoning_effort: "high"

@@ -16,7 +16,7 @@ The repository CI runs tests, the race detector, `go vet`, a Linux plugin build,
 
 ## Release workflow
 
-Push a semantic tag such as `v0.3.0`. The release workflow builds the Linux amd64 plugin in GitHub Actions, places only `cliproxyapi-cursor-provider.so` at the ZIP root, creates `checksums.txt`, and uploads both artifacts to the GitHub release. Building in CI prevents a local auth directory from entering the archive.
+Push the first public tag as `v0.1.0`. The release workflow builds the Linux amd64 plugin in GitHub Actions, places only `cliproxyapi-cursor-provider.so` at the ZIP root, creates `checksums.txt`, and uploads both artifacts to the GitHub release. Building in CI prevents a local auth directory from entering the archive.
 
 ## Third-party Plugin Store
 

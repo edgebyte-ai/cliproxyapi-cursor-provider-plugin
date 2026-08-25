@@ -68,7 +68,7 @@ func main() {
 		resolvedLabel = strings.TrimSpace(source.Label)
 	}
 	target := targetAccount{
-		Type: "cursor-provider", Label: resolvedLabel, AccessToken: source.AccessToken,
+		Type: "cursor", Label: resolvedLabel, AccessToken: source.AccessToken,
 		RefreshToken: source.RefreshToken, ExpiresAt: source.ExpiresAt,
 		Prefix: strings.TrimSpace(*prefix), Priority: *priority,
 		AllowedModels: splitCSV(*allow), DeniedModels: splitCSV(*deny),

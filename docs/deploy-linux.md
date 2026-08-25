@@ -20,10 +20,10 @@ Download into a temporary directory and verify the published SHA-256:
 ```sh
 tmp_dir=$(mktemp -d)
 cd "$tmp_dir"
-curl -fLO https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/releases/download/v0.2.0/cliproxyapi-cursor-provider_0.2.0_linux_amd64.zip
-curl -fLO https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/releases/download/v0.2.0/checksums.txt
+curl -fLO https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/releases/download/v0.1.0/cliproxyapi-cursor-provider_0.1.0_linux_amd64.zip
+curl -fLO https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/releases/download/v0.1.0/checksums.txt
 sha256sum -c checksums.txt
-unzip cliproxyapi-cursor-provider_0.2.0_linux_amd64.zip
+unzip cliproxyapi-cursor-provider_0.1.0_linux_amd64.zip
 install -m 755 cliproxyapi-cursor-provider.so /opt/cliproxyapi/plugins/linux/amd64/cliproxyapi-cursor-provider.so
 ```
 
@@ -41,7 +41,7 @@ plugins:
     cliproxyapi-cursor-provider:
       enabled: true
       priority: 100
-      provider_id: "cursor-provider"
+      provider_id: "cursor"
       model_prefix: ""
       model_mode: "normalized"
       default_reasoning_effort: "high"
@@ -77,7 +77,7 @@ Start the plugin login flow through the target CLIProxyAPI Management API:
 ```sh
 curl -sS \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  http://127.0.0.1:8317/v0/management/cursor-provider-auth-url
+  http://127.0.0.1:8317/v0/management/cursor-auth-url
 ```
 
 Open the returned Cursor URL in your browser. Poll the returned state until it reports `ok`:

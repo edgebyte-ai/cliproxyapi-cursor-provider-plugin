@@ -6,7 +6,7 @@
       "name": "Cursor Provider",
       "description": "Experimental multi-account Cursor subscription provider using direct Connect-RPC.",
       "author": "edgebyte-ai",
-      "version": "0.2.0",
+      "version": "0.1.0",
       "repository": "https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin",
       "homepage": "https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin",
       "license": "AGPL-3.0",
