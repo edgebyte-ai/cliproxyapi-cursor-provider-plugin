@@ -2,13 +2,13 @@
   "schema_version": 1,
   "plugins": [
     {
-      "id": "cliproxyapi-cursor-native",
-      "name": "Cursor Native Provider",
+      "id": "cliproxyapi-cursor-provider",
+      "name": "Cursor Provider",
       "description": "Experimental multi-account Cursor subscription provider using direct Connect-RPC.",
       "author": "edgebyte-ai",
-      "version": "0.1.1",
-      "repository": "https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin",
-      "homepage": "https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin",
+      "version": "0.2.0",
+      "repository": "https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin",
+      "homepage": "https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin",
       "license": "AGPL-3.0",
       "tags": ["Provider", "Cursor", "OAuth", "Quota", "Experimental"]
     }

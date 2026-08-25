@@ -1,4 +1,4 @@
-PLUGIN_NAME := cliproxyapi-cursor-native
+PLUGIN_NAME := cliproxyapi-cursor-provider
 OUT_DIR := build/plugins/linux/amd64
 VERSION ?= dev
 

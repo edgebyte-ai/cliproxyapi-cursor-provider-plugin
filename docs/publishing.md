@@ -16,14 +16,14 @@ The repository CI runs tests, the race detector, `go vet`, a Linux plugin build,
 
 ## Release workflow
 
-Push a semantic tag such as `v0.2.0`. The release workflow builds the Linux amd64 plugin in GitHub Actions, places only `cliproxyapi-cursor-native.so` at the ZIP root, creates `checksums.txt`, and uploads both artifacts to the GitHub release. Building in CI prevents a local auth directory from entering the archive.
+Push a semantic tag such as `v0.3.0`. The release workflow builds the Linux amd64 plugin in GitHub Actions, places only `cliproxyapi-cursor-provider.so` at the ZIP root, creates `checksums.txt`, and uploads both artifacts to the GitHub release. Building in CI prevents a local auth directory from entering the archive.
 
 ## Third-party Plugin Store
 
 This repository publishes a registry at:
 
 ```text
-https://raw.githubusercontent.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/main/plugin-store/registry.json
+https://raw.githubusercontent.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/main/plugin-store/registry.json
 ```
 
 Users add it to CLIProxyAPI:
@@ -33,7 +33,7 @@ plugins:
   enabled: true
   dir: "plugins"
   store-sources:
-    - "https://raw.githubusercontent.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/main/plugin-store/registry.json"
+    - "https://raw.githubusercontent.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/main/plugin-store/registry.json"
 ```
 
 They can then install and update the plugin through CLIProxyAPI's Plugin Store UI. Credentials are created later by the target CLIProxyAPI browser-login flow and are never downloaded from the store.

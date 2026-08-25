@@ -1,4 +1,4 @@
-module github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin
+module github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin
 
 go 1.26.0
 

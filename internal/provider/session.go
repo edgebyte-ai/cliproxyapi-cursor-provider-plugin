@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/internal/pb"
+	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/pb"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -1,7 +1,7 @@
 services:
   cliproxyapi:
     image: eceasy/cli-proxy-api:v7.2.141
-    container_name: cursor-native-plugin-test
+    container_name: cursor-provider-plugin-test
     restart: unless-stopped
     environment:
       TZ: UTC

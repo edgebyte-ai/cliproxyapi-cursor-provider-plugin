@@ -20,18 +20,14 @@ Download into a temporary directory and verify the published SHA-256:
 ```sh
 tmp_dir=$(mktemp -d)
 cd "$tmp_dir"
-curl -fLO https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/releases/download/v0.1.1/cliproxyapi-cursor-native_0.1.1_linux_amd64.zip
-curl -fLO https://github.com/edgebyte-ai/cliproxyapi-cursor-native-plugin/releases/download/v0.1.1/checksums.txt
+curl -fLO https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/releases/download/v0.2.0/cliproxyapi-cursor-provider_0.2.0_linux_amd64.zip
+curl -fLO https://github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/releases/download/v0.2.0/checksums.txt
 sha256sum -c checksums.txt
-unzip cliproxyapi-cursor-native_0.1.1_linux_amd64.zip
-install -m 755 cliproxyapi-cursor-native.so /opt/cliproxyapi/plugins/linux/amd64/cliproxyapi-cursor-native.so
+unzip cliproxyapi-cursor-provider_0.2.0_linux_amd64.zip
+install -m 755 cliproxyapi-cursor-provider.so /opt/cliproxyapi/plugins/linux/amd64/cliproxyapi-cursor-provider.so
 ```
 
-Expected v0.1.1 ZIP checksum:
-
-```text
-9cb35ac1cf8d4dc5d724a9665ae6f5412daa2085557844822642009f12150372
-```
+Use the release's signed-in-place `checksums.txt` as the checksum authority; do not copy a checksum from chat or a third-party page.
 
 ## CLIProxyAPI configuration
 
@@ -42,10 +38,10 @@ plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cliproxyapi-cursor-native:
+    cliproxyapi-cursor-provider:
       enabled: true
       priority: 100
-      provider_id: "cursor-native"
+      provider_id: "cursor-provider"
       model_prefix: ""
       model_mode: "normalized"
       default_reasoning_effort: "high"
@@ -69,10 +65,10 @@ services:
 `plugins.dir` is relative to CLIProxyAPI's working directory. The mounted directory must contain:
 
 ```text
-plugins/linux/amd64/cliproxyapi-cursor-native.so
+plugins/linux/amd64/cliproxyapi-cursor-provider.so
 ```
 
-Restart only the target CLIProxyAPI instance after reviewing the config. Verify the log contains both `plugin loaded` and `plugin registered` for `cliproxyapi-cursor-native`.
+Restart only the target CLIProxyAPI instance after reviewing the config. Verify the log contains both `plugin loaded` and `plugin registered` for `cliproxyapi-cursor-provider`.
 
 ## Add Cursor accounts without copying tokens
 
@@ -81,7 +77,7 @@ Start the plugin login flow through the target CLIProxyAPI Management API:
 ```sh
 curl -sS \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  http://127.0.0.1:8317/v0/management/cursor-native-auth-url
+  http://127.0.0.1:8317/v0/management/cursor-provider-auth-url
 ```
 
 Open the returned Cursor URL in your browser. Poll the returned state until it reports `ok`:
@@ -100,7 +96,7 @@ Set each account's policy through the plugin's authenticated Management API. Thi
 curl -sS -X PATCH \
   -H "Authorization: Bearer $MANAGEMENT_KEY" \
   -H "Content-Type: application/json" \
-  "http://127.0.0.1:8317/v0/management/plugins/cursor-native/account-policy?auth_index=$AUTH_INDEX" \
+  "http://127.0.0.1:8317/v0/management/plugins/cursor-provider/account-policy?auth_index=$AUTH_INDEX" \
   -d '{"priority":10,"prefix":"","allowed_models":["cursor-grok-*","composer-*","*fable*"],"denied_models":["*-fast"]}'
 ```
 
@@ -117,17 +113,17 @@ Check models and each account's quota:
 curl -sS -H "Authorization: Bearer $API_KEY" http://127.0.0.1:8317/v1/models
 curl -sS -H "Authorization: Bearer $MANAGEMENT_KEY" http://127.0.0.1:8317/v0/management/auth-files
 curl -sS -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  "http://127.0.0.1:8317/v0/management/plugins/cursor-native/quota?auth_index=$AUTH_INDEX"
+  "http://127.0.0.1:8317/v0/management/plugins/cursor-provider/quota?auth_index=$AUTH_INDEX"
 ```
 
 The browser quota page is:
 
 ```text
-/v0/resource/plugins/cliproxyapi-cursor-native/quota
+/v0/resource/plugins/cliproxyapi-cursor-provider/quota
 ```
 
 Its management key is stored only in that tab's `sessionStorage`; a 401 clears it, and closing the tab discards it.
 
 ## Rollback
 
-Disable `plugins.configs.cliproxyapi-cursor-native.enabled`, restart CLIProxyAPI, and confirm existing providers still work. Then remove the `.so`. Preserve the Cursor auth files until rollback is accepted; delete them only when you intentionally want to revoke the local integration.
+Disable `plugins.configs.cliproxyapi-cursor-provider.enabled`, restart CLIProxyAPI, and confirm existing providers still work. Then remove the `.so`. Preserve the Cursor auth files until rollback is accepted; delete them only when you intentionally want to revoke the local integration.
