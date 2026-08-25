@@ -33,3 +33,5 @@ jobs:
             echo "credential-like value found in tracked files" >&2
             exit 1
           fi
+      - name: Validate Plugin Store registry
+        run: go test -tags registryvalidation ./scripts -run TestRegistry -count=1

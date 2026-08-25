@@ -12,7 +12,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-const pluginVersion = "0.1.0"
+var pluginVersion = "dev"
 
 type lifecycleRequest struct {
 	ConfigYAML []byte `json:"config_yaml"`
@@ -102,7 +102,21 @@ type hostAuthGetRequest struct {
 }
 
 type hostAuthGetResponse struct {
+	Name string          `json:"name"`
 	JSON json.RawMessage `json:"json"`
+}
+
+type hostAuthSaveRequest struct {
+	HostCallbackID string          `json:"host_callback_id,omitempty"`
+	Name           string          `json:"name"`
+	JSON           json.RawMessage `json:"json"`
+}
+
+type accountPolicyUpdate struct {
+	Prefix        *string   `json:"prefix,omitempty"`
+	Priority      *int      `json:"priority,omitempty"`
+	AllowedModels *[]string `json:"allowed_models,omitempty"`
+	DeniedModels  *[]string `json:"denied_models,omitempty"`
 }
 
 func dispatch(method string, request []byte) (any, error) {
@@ -197,7 +211,10 @@ func dispatch(method string, request []byte) (any, error) {
 		return nil, &provider.StatusError{Code: "unsupported_http", Message: "arbitrary Cursor HTTP proxying is disabled", HTTPStatus: http.StatusForbidden}
 	case pluginabi.MethodManagementRegister:
 		return rpcManagementRegistrationResponse{
-			Routes:    []rpcManagementRoute{{Method: http.MethodGet, Path: "/plugins/cursor-native/quota", Description: "Cursor native quota groups for one auth_index"}},
+			Routes: []rpcManagementRoute{
+				{Method: http.MethodGet, Path: "/plugins/cursor-native/quota", Description: "Cursor native quota groups for one auth_index"},
+				{Method: http.MethodPatch, Path: "/plugins/cursor-native/account-policy", Description: "Update one Cursor account model policy and priority"},
+			},
 			Resources: []rpcResourceRoute{{Path: "/quota", Menu: "Cursor Quota", Description: "Cursor account quota groups"}},
 		}, nil
 	case pluginabi.MethodManagementHandle:
@@ -224,6 +241,9 @@ func handleManagement(ctx context.Context, req rpcManagementRequest) (pluginapi.
 			},
 			Body: []byte(cursorQuotaPage),
 		}, nil
+	}
+	if req.Method == http.MethodPatch && strings.HasSuffix(req.Path, "/plugins/cursor-native/account-policy") {
+		return updateAccountPolicy(req)
 	}
 	if req.Method != http.MethodGet || !strings.HasSuffix(req.Path, "/plugins/cursor-native/quota") {
 		return pluginapi.ManagementResponse{StatusCode: http.StatusNotFound, Body: []byte(`{"error":"not found"}`)}, nil
@@ -252,6 +272,74 @@ func handleManagement(ctx context.Context, req rpcManagementRequest) (pluginapi.
 	return pluginapi.ManagementResponse{StatusCode: http.StatusOK, Headers: http.Header{"Content-Type": []string{"application/json"}}, Body: body}, nil
 }
 
+func updateAccountPolicy(req rpcManagementRequest) (pluginapi.ManagementResponse, error) {
+	authIndex := strings.TrimSpace(req.Query.Get("auth_index"))
+	if authIndex == "" {
+		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"auth_index is required"}`)}, nil
+	}
+	raw, err := callHost(pluginabi.MethodHostAuthGet, hostAuthGetRequest{HostCallbackID: req.HostCallbackID, AuthIndex: authIndex})
+	if err != nil {
+		return pluginapi.ManagementResponse{}, err
+	}
+	var current hostAuthGetResponse
+	if err := json.Unmarshal(raw, &current); err != nil {
+		return pluginapi.ManagementResponse{}, err
+	}
+	if strings.TrimSpace(current.Name) == "" || !strings.HasSuffix(strings.ToLower(current.Name), ".json") {
+		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"Cursor auth has no writable source file"}`)}, nil
+	}
+	var storage provider.AuthStorage
+	if err := json.Unmarshal(current.JSON, &storage); err != nil {
+		return pluginapi.ManagementResponse{}, err
+	}
+	var update accountPolicyUpdate
+	if err := json.Unmarshal(req.Body, &update); err != nil {
+		return pluginapi.ManagementResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":"invalid policy body"}`)}, nil
+	}
+	if update.Prefix != nil {
+		storage.Prefix = strings.TrimSpace(*update.Prefix)
+	}
+	if update.Priority != nil {
+		storage.Priority = *update.Priority
+	}
+	if update.AllowedModels != nil {
+		storage.AllowedModels = cleanPolicyPatterns(*update.AllowedModels)
+	}
+	if update.DeniedModels != nil {
+		storage.DeniedModels = cleanPolicyPatterns(*update.DeniedModels)
+	}
+	updatedJSON, err := json.Marshal(storage)
+	if err != nil {
+		return pluginapi.ManagementResponse{}, err
+	}
+	if _, err := callHost(pluginabi.MethodHostAuthSave, hostAuthSaveRequest{HostCallbackID: req.HostCallbackID, Name: current.Name, JSON: updatedJSON}); err != nil {
+		return pluginapi.ManagementResponse{}, err
+	}
+	body, _ := json.Marshal(map[string]any{
+		"status": "ok", "auth_index": authIndex, "name": current.Name,
+		"prefix": storage.Prefix, "priority": storage.Priority,
+		"allowed_models": storage.AllowedModels, "denied_models": storage.DeniedModels,
+	})
+	return pluginapi.ManagementResponse{StatusCode: http.StatusOK, Headers: http.Header{"Content-Type": []string{"application/json"}}, Body: body}, nil
+}
+
+func cleanPolicyPatterns(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
 const cursorQuotaPage = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cursor Quota</title><style>
@@ -259,10 +347,12 @@ body{font:14px system-ui;background:#111827;color:#e5e7eb;margin:0;padding:28px}
 </style></head><body><main><h1>Cursor Quota</h1><div class="hint">Management key stays in page memory and is sent only to this CLIProxyAPI origin.</div>
 <div class="controls"><input id="key" type="password" autocomplete="off" placeholder="Management key"><button id="load">Load quotas</button></div><div id="out" class="grid"></div></main>
 <script>
-const out=document.getElementById('out'),key=document.getElementById('key');
+const out=document.getElementById('out'),key=document.getElementById('key'),storageKey='cliproxyapi.cursor-native.management-key';
+key.value=sessionStorage.getItem(storageKey)||'';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(path){const r=await fetch(path,{headers:{Authorization:'Bearer '+key.value},cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status+' '+await r.text());return r.json()}
-document.getElementById('load').onclick=async()=>{out.innerHTML='Loading…';try{const auth=await api('/v0/management/auth-files');const rows=(auth.files||[]).filter(x=>x.type==='cursor-native');const results=await Promise.all(rows.map(async a=>{try{return{a,q:await api('/v0/management/plugins/cursor-native/quota?auth_index='+encodeURIComponent(a.auth_index))}}catch(e){return{a,e}}}));out.innerHTML=results.map(({a,q,e})=>{if(e)return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong></div><div class="error">'+esc(e.message)+'</div></section>';return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong><span>P'+esc(a.priority||0)+'</span></div>'+q.quota.map(x=>{const used=Number(x.usedPercent);const remain=Number.isFinite(used)?Math.max(0,100-used):0;return '<div class="quota"><span>'+esc(x.key)+'</span><div class="bar"><div class="fill '+(remain<20?'danger':'')+'" style="width:'+remain+'%"></div></div><strong>'+remain.toFixed(1)+'%</strong></div>'}).join('')+'</section>'}).join('')}catch(e){out.innerHTML='<div class="error">'+esc(e.message)+'</div>'}}
+async function api(path){const r=await fetch(path,{headers:{Authorization:'Bearer '+key.value},cache:'no-store'});if(r.status===401){sessionStorage.removeItem(storageKey);key.value=''}if(!r.ok)throw new Error('HTTP '+r.status+' '+await r.text());return r.json()}
+async function load(){if(!key.value){out.innerHTML='<div class="error">Enter the management key.</div>';return}sessionStorage.setItem(storageKey,key.value);out.innerHTML='Loading…';try{const auth=await api('/v0/management/auth-files');const rows=(auth.files||[]).filter(x=>x.type==='cursor-native');const results=await Promise.all(rows.map(async a=>{try{return{a,q:await api('/v0/management/plugins/cursor-native/quota?auth_index='+encodeURIComponent(a.auth_index))}}catch(e){return{a,e}}}));out.innerHTML=results.map(({a,q,e})=>{if(e)return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong></div><div class="error">'+esc(e.message)+'</div></section>';return '<section class="card"><div class="title"><strong>'+esc(a.label||a.name)+'</strong><span>P'+esc(a.priority||0)+'</span></div>'+q.quota.map(x=>{const used=Number(x.usedPercent);const remain=Number.isFinite(used)?Math.max(0,100-used):0;return '<div class="quota"><span>'+esc(x.key)+'</span><div class="bar"><div class="fill '+(remain<20?'danger':'')+'" style="width:'+remain+'%"></div></div><strong>'+remain.toFixed(1)+'%</strong></div>'}).join('')+'</section>'}).join('')}catch(e){out.innerHTML='<div class="error">'+esc(e.message)+'</div>'}}
+document.getElementById('load').onclick=load;if(key.value)load();
 </script></body></html>`
 
 func pluginRegistration() registration {
