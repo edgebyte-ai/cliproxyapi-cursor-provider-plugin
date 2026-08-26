@@ -25,6 +25,16 @@ type toolCall struct {
 	Args map[string]any
 }
 
+// PreparedStream holds a Cursor stream after the upstream has produced its
+// first deliverable or successful terminal event. Errors received before that
+// boundary remain synchronous so CLIProxyAPI can fail over to another auth.
+type PreparedStream struct {
+	headers http.Header
+	events  <-chan TurnEvent
+	pending []TurnEvent
+	state   *streamState
+}
+
 func (s *Service) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
 	storage, err := decodeAuth(req.StorageJSON)
 	if err != nil {
@@ -57,6 +67,19 @@ func (s *Service) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (p
 }
 
 func (s *Service) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequest, emit func([]byte) error) (http.Header, error) {
+	prepared, err := s.PrepareStream(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := prepared.Pump(emit); err != nil {
+		return nil, err
+	}
+	return prepared.Headers(), nil
+}
+
+// PrepareStream validates the request and waits until Cursor either rejects it
+// or produces an event that commits the response stream.
+func (s *Service) PrepareStream(ctx context.Context, req pluginapi.ExecutorRequest) (*PreparedStream, error) {
 	storage, err := decodeAuth(req.StorageJSON)
 	if err != nil {
 		return nil, err
@@ -73,29 +96,101 @@ func (s *Service) ExecuteStream(ctx context.Context, req pluginapi.ExecutorReque
 	if err != nil {
 		return nil, err
 	}
-	created := s.now().Unix()
-	state := newStreamState(parsed.ResponseFormat, parsed.Model, created)
+	return prepareEventStream(parsed.ResponseFormat, parsed.Model, s.now().Unix(), events)
+}
+
+func prepareEventStream(format, model string, created int64, events <-chan TurnEvent) (*PreparedStream, error) {
+	pending := make([]TurnEvent, 0, 2)
 	for event := range events {
-		frames, frameErr := state.frames(event)
+		if event.Type == "done" && event.Err != nil {
+			return nil, event.Err
+		}
+		pending = append(pending, event)
+		if streamEventCommits(format, event) {
+			headers := make(http.Header)
+			headers.Set("Content-Type", "text/event-stream")
+			headers.Set("Cache-Control", "no-cache")
+			return &PreparedStream{
+				headers: headers,
+				events:  events,
+				pending: pending,
+				state:   newStreamState(format, model, created),
+			}, nil
+		}
+	}
+	return nil, &StatusError{
+		Code:       "cursor_stream_empty",
+		Message:    "Cursor stream closed before producing a response",
+		HTTPStatus: http.StatusBadGateway,
+		Retryable:  true,
+	}
+}
+
+func streamEventCommits(format string, event TurnEvent) bool {
+	switch event.Type {
+	case "text", "tool_call", "done":
+		return true
+	case "thinking":
+		return format != "openai-response"
+	default:
+		return false
+	}
+}
+
+// Headers returns a defensive copy of the downstream stream headers.
+func (p *PreparedStream) Headers() http.Header {
+	if p == nil {
+		return nil
+	}
+	return p.headers.Clone()
+}
+
+// Pump converts all buffered and subsequent Cursor events to downstream SSE.
+func (p *PreparedStream) Pump(emit func([]byte) error) error {
+	if p == nil || p.state == nil {
+		return &StatusError{Code: "cursor_stream_unprepared", Message: "Cursor stream was not prepared", HTTPStatus: http.StatusInternalServerError}
+	}
+	if emit == nil {
+		return &StatusError{Code: "cursor_stream_emitter_missing", Message: "Cursor stream emitter is required", HTTPStatus: http.StatusInternalServerError}
+	}
+	consume := func(event TurnEvent) (bool, error) {
+		if event.Type == "done" && event.Err != nil {
+			return true, event.Err
+		}
+		frames, frameErr := p.state.frames(event)
 		if frameErr != nil {
-			return nil, frameErr
+			return true, frameErr
 		}
 		for _, frame := range frames {
 			if err := emit(frame); err != nil {
-				return nil, err
+				return true, err
 			}
 		}
 		if event.Type == "done" {
-			if event.Err != nil {
-				return nil, event.Err
-			}
-			break
+			return true, nil
+		}
+		return false, nil
+	}
+	for _, event := range p.pending {
+		done, err := consume(event)
+		if done || err != nil {
+			p.pending = nil
+			return err
 		}
 	}
-	headers := make(http.Header)
-	headers.Set("Content-Type", "text/event-stream")
-	headers.Set("Cache-Control", "no-cache")
-	return headers, nil
+	p.pending = nil
+	for event := range p.events {
+		done, err := consume(event)
+		if done || err != nil {
+			return err
+		}
+	}
+	return &StatusError{
+		Code:       "cursor_stream_incomplete",
+		Message:    "Cursor stream ended without a terminal event",
+		HTTPStatus: http.StatusBadGateway,
+		Retryable:  true,
+	}
 }
 
 func (s *Service) CountTokens(_ context.Context, req pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
