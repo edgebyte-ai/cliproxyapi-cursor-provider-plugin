@@ -14,19 +14,20 @@ import (
 const ProviderID = "cursor"
 
 type Config struct {
-	Enabled                bool     `yaml:"enabled" json:"enabled"`
-	ProviderID             string   `yaml:"provider_id" json:"provider_id"`
-	ModelPrefix            string   `yaml:"model_prefix" json:"model_prefix"`
-	ModelMode              string   `yaml:"model_mode" json:"model_mode"`
-	DefaultReasoningEffort string   `yaml:"default_reasoning_effort" json:"default_reasoning_effort"`
-	CursorBaseURL          string   `yaml:"cursor_base_url" json:"cursor_base_url"`
-	ClientVersion          string   `yaml:"client_version" json:"client_version"`
-	AllowedNativeTools     []string `yaml:"allowed_native_tools" json:"allowed_native_tools"`
-	RequestTimeoutSeconds  int      `yaml:"request_timeout_seconds" json:"request_timeout_seconds"`
-	ModelCacheTTLSeconds   int      `yaml:"model_cache_ttl_seconds" json:"model_cache_ttl_seconds"`
-	ContinuationPrompt     string   `yaml:"continuation_prompt" json:"continuation_prompt"`
-	MaxRequestBytes        int      `yaml:"max_request_bytes" json:"max_request_bytes"`
-	MaxHistoryMessageBytes int      `yaml:"max_history_message_bytes" json:"max_history_message_bytes"`
+	Enabled                bool              `yaml:"enabled" json:"enabled"`
+	ProviderID             string            `yaml:"provider_id" json:"provider_id"`
+	ModelPrefix            string            `yaml:"model_prefix" json:"model_prefix"`
+	ModelMode              string            `yaml:"model_mode" json:"model_mode"`
+	DefaultReasoningEffort string            `yaml:"default_reasoning_effort" json:"default_reasoning_effort"`
+	ModelDisplayNames      map[string]string `yaml:"model_display_names" json:"model_display_names"`
+	CursorBaseURL          string            `yaml:"cursor_base_url" json:"cursor_base_url"`
+	ClientVersion          string            `yaml:"client_version" json:"client_version"`
+	AllowedNativeTools     []string          `yaml:"allowed_native_tools" json:"allowed_native_tools"`
+	RequestTimeoutSeconds  int               `yaml:"request_timeout_seconds" json:"request_timeout_seconds"`
+	ModelCacheTTLSeconds   int               `yaml:"model_cache_ttl_seconds" json:"model_cache_ttl_seconds"`
+	ContinuationPrompt     string            `yaml:"continuation_prompt" json:"continuation_prompt"`
+	MaxRequestBytes        int               `yaml:"max_request_bytes" json:"max_request_bytes"`
+	MaxHistoryMessageBytes int               `yaml:"max_history_message_bytes" json:"max_history_message_bytes"`
 }
 
 func DefaultConfig() Config {
@@ -36,6 +37,7 @@ func DefaultConfig() Config {
 		ModelPrefix:            "",
 		ModelMode:              "normalized",
 		DefaultReasoningEffort: "high",
+		ModelDisplayNames:      map[string]string{},
 		CursorBaseURL:          "https://api2.cursor.sh",
 		ClientVersion:          "cli-2026.08.11-e8db854",
 		AllowedNativeTools:     []string{"mcp_tool_call"},
@@ -65,6 +67,16 @@ func ParseConfig(raw []byte) (Config, error) {
 	if cfg.ModelMode != "raw" && cfg.ModelMode != "normalized" && cfg.ModelMode != "both" {
 		return Config{}, fmt.Errorf("model_mode must be raw, normalized, or both")
 	}
+	displayNames := make(map[string]string, len(cfg.ModelDisplayNames))
+	for modelID, displayName := range cfg.ModelDisplayNames {
+		modelID = strings.ToLower(strings.TrimSpace(modelID))
+		displayName = strings.TrimSpace(displayName)
+		if modelID == "" || displayName == "" {
+			continue
+		}
+		displayNames[modelID] = displayName
+	}
+	cfg.ModelDisplayNames = displayNames
 	if strings.TrimSpace(cfg.CursorBaseURL) == "" {
 		return Config{}, fmt.Errorf("cursor_base_url is required")
 	}
@@ -81,6 +93,13 @@ func ParseConfig(raw []byte) (Config, error) {
 		return Config{}, fmt.Errorf("max_history_message_bytes must be at least 1024")
 	}
 	return cfg, nil
+}
+
+func (c Config) ModelDisplayName(modelID, fallback string) string {
+	if displayName := strings.TrimSpace(c.ModelDisplayNames[strings.ToLower(strings.TrimSpace(modelID))]); displayName != "" {
+		return displayName
+	}
+	return fallback
 }
 
 func (c Config) RequestTimeout() time.Duration {

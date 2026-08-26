@@ -356,6 +356,7 @@ func pluginRegistration() registration {
 				{Name: "model_prefix", Type: pluginapi.ConfigFieldTypeString, Description: "Prefix added to Cursor model IDs."},
 				{Name: "model_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"raw", "normalized", "both"}, Description: "Cursor model catalog compatibility mode."},
 				{Name: "default_reasoning_effort", Type: pluginapi.ConfigFieldTypeString, Description: "Default effort for normalized model families."},
+				{Name: "model_display_names", Type: pluginapi.ConfigFieldTypeObject, Description: "Exact Cursor model ID to catalog display-name mappings."},
 			},
 		},
 		Capabilities: registrationCapability{
