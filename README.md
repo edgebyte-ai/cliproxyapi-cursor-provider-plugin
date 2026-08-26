@@ -12,6 +12,13 @@ Current target capabilities:
 - `resource_exhausted`, reset metadata and retry/cooldown propagation;
 - `cursor-native` and `other-models` quota groups through a management route.
 - a plugin-owned browser editor for each account's priority, prefix, allow rules, and deny rules.
+
+Transient Cursor gateway and transport failures are retried before the plugin
+commits a response. The default is one retry after 250 ms. Configure this with
+`transient_retry_count` (0-3) and `transient_retry_delay_ms` (0-5000) in the
+plugin editor. Authentication, permission, model-support, and quota failures
+are never retried by this mechanism, so CLIProxyAPI can rotate providers or
+credentials immediately.
 - configurable exact model ID to catalog display-name mappings.
 
 The plugin is MIT licensed. Credentials belong in CLIProxyAPI's private auth directory and must never be committed.

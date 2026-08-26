@@ -12,3 +12,10 @@ func TestCursorResourceExhaustedMapsTo429AndReset(t *testing.T) {
 		t.Fatalf("unexpected mapped error: %+v", err)
 	}
 }
+
+func TestCursorStatusErrorMarksGatewayFailureRetryable(t *testing.T) {
+	err := cursorStatusError([]byte("Bad Gateway"), http.StatusBadGateway)
+	if err.HTTPStatus != http.StatusBadGateway || !err.Retryable || err.Message != "Bad Gateway" {
+		t.Fatalf("cursorStatusError() = %#v", err)
+	}
+}

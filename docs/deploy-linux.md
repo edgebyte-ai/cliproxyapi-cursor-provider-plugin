@@ -52,6 +52,8 @@ plugins:
       client_version: "cli-2026.08.11-e8db854"
       allowed_native_tools: ["mcp_tool_call"]
       request_timeout_seconds: 300
+      transient_retry_count: 1
+      transient_retry_delay_ms: 250
       model_cache_ttl_seconds: 600
 ```
 
