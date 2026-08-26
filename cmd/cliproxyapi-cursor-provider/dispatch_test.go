@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/provider"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
 func TestPluginRegistrationName(t *testing.T) {
@@ -84,5 +88,30 @@ func TestQuotaPageProvidesGenericPolicyEditorWithoutPresets(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(cursorQuotaPage), "preset") {
 		t.Fatal("quota page must not include policy presets")
+	}
+}
+
+func TestStreamDispatchReturnsPreparationErrorSynchronously(t *testing.T) {
+	original := prepareCursorStream
+	t.Cleanup(func() { prepareCursorStream = original })
+	want := &provider.StatusError{
+		Code:       "resource_exhausted",
+		Message:    "Cursor Grok is busy",
+		HTTPStatus: http.StatusTooManyRequests,
+		Retryable:  true,
+	}
+	prepareCursorStream = func(context.Context, pluginapi.ExecutorRequest) (*provider.PreparedStream, error) {
+		return nil, want
+	}
+	raw, err := json.Marshal(rpcExecutorRequest{StreamID: "stream-1"})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	result, err := dispatch(pluginabi.MethodExecutorExecuteStream, raw)
+	if result != nil {
+		t.Fatalf("dispatch() result = %#v, want nil", result)
+	}
+	if !errors.Is(err, want) {
+		t.Fatalf("dispatch() error = %v, want %v", err, want)
 	}
 }

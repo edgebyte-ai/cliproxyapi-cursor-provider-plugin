@@ -14,6 +14,10 @@ import (
 
 var pluginVersion = "dev"
 
+var prepareCursorStream = func(ctx context.Context, req pluginapi.ExecutorRequest) (*provider.PreparedStream, error) {
+	return pluginService.PrepareStream(ctx, req)
+}
+
 type lifecycleRequest struct {
 	ConfigYAML []byte `json:"config_yaml"`
 }
@@ -185,9 +189,12 @@ func dispatch(method string, request []byte) (any, error) {
 		if err := json.Unmarshal(request, &req); err != nil {
 			return nil, err
 		}
-		headers := http.Header{"Content-Type": []string{"text/event-stream"}, "Cache-Control": []string{"no-cache"}}
+		prepared, err := prepareCursorStream(ctx, req.ExecutorRequest)
+		if err != nil {
+			return nil, err
+		}
 		go func() {
-			_, streamErr := pluginService.ExecuteStream(context.Background(), req.ExecutorRequest, func(payload []byte) error {
+			streamErr := prepared.Pump(func(payload []byte) error {
 				_, emitErr := callHost(pluginabi.MethodHostStreamEmit, hostStreamEmitRequest{StreamID: req.StreamID, Payload: payload})
 				return emitErr
 			})
@@ -197,7 +204,7 @@ func dispatch(method string, request []byte) (any, error) {
 			}
 			_, _ = callHost(pluginabi.MethodHostStreamClose, hostStreamCloseRequest{StreamID: req.StreamID, Error: message})
 		}()
-		return map[string]any{"headers": headers}, nil
+		return map[string]any{"headers": prepared.Headers()}, nil
 	case pluginabi.MethodExecutorCountTokens:
 		var req rpcExecutorRequest
 		if err := json.Unmarshal(request, &req); err != nil {
