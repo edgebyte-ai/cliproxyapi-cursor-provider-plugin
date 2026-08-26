@@ -3,6 +3,7 @@ package provider
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProviderIDAndConfigAreCursor(t *testing.T) {
@@ -18,6 +19,26 @@ func TestProviderIDAndConfigAreCursor(t *testing.T) {
 	}
 	if _, err := ParseConfig([]byte("provider_id: cursor-provider\n")); err == nil || !strings.Contains(err.Error(), `provider_id must be "cursor"`) {
 		t.Fatalf("ParseConfig() error = %v, want cursor validation error", err)
+	}
+}
+
+func TestParseConfigValidatesTransientRetrySettings(t *testing.T) {
+	cfg, err := ParseConfig([]byte("transient_retry_count: 3\ntransient_retry_delay_ms: 5000\n"))
+	if err != nil {
+		t.Fatalf("ParseConfig() error = %v", err)
+	}
+	if cfg.TransientRetryCount != 3 || cfg.TransientRetryDelay() != 5*time.Second {
+		t.Fatalf("retry config = count %d, delay %v", cfg.TransientRetryCount, cfg.TransientRetryDelay())
+	}
+	for _, raw := range []string{
+		"transient_retry_count: -1\n",
+		"transient_retry_count: 4\n",
+		"transient_retry_delay_ms: -1\n",
+		"transient_retry_delay_ms: 5001\n",
+	} {
+		if _, err := ParseConfig([]byte(raw)); err == nil {
+			t.Fatalf("ParseConfig(%q) succeeded, want error", raw)
+		}
 	}
 }
 

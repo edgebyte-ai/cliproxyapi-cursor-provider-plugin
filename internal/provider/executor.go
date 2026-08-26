@@ -3,7 +3,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -51,11 +54,13 @@ func (s *Service) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (p
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
 	}
-	events, err := s.runTurn(ctx, storage, model, parsed.Input)
-	if err != nil {
-		return pluginapi.ExecutorResponse{}, err
-	}
-	result, err := collectTurn(events)
+	result, err := retryTransient(ctx, s.Config(), func() (collectedTurn, error) {
+		events, runErr := s.runTurn(ctx, storage, model, parsed.Input)
+		if runErr != nil {
+			return collectedTurn{}, runErr
+		}
+		return collectTurn(events)
+	})
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
 	}
@@ -92,11 +97,55 @@ func (s *Service) PrepareStream(ctx context.Context, req pluginapi.ExecutorReque
 	if err != nil {
 		return nil, err
 	}
-	events, err := s.runTurn(ctx, storage, model, parsed.Input)
-	if err != nil {
-		return nil, err
+	return retryTransient(ctx, s.Config(), func() (*PreparedStream, error) {
+		events, runErr := s.runTurn(ctx, storage, model, parsed.Input)
+		if runErr != nil {
+			return nil, runErr
+		}
+		return prepareEventStream(parsed.ResponseFormat, parsed.Model, s.now().Unix(), events)
+	})
+}
+
+func retryTransient[T any](ctx context.Context, cfg Config, operation func() (T, error)) (T, error) {
+	var zero T
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return prepareEventStream(parsed.ResponseFormat, parsed.Model, s.now().Unix(), events)
+	for attempt := 0; ; attempt++ {
+		result, err := operation()
+		if err == nil {
+			return result, nil
+		}
+		if attempt >= cfg.TransientRetryCount || !isTransientCursorError(ctx, err) {
+			return zero, err
+		}
+		delay := cfg.TransientRetryDelay() * time.Duration(1<<attempt)
+		if delay <= 0 {
+			continue
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return zero, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func isTransientCursorError(ctx context.Context, err error) bool {
+	if err == nil || (ctx != nil && ctx.Err() != nil) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var statusErr *StatusError
+	if errors.As(err, &statusErr) {
+		return isTransientHTTPStatus(statusErr.HTTPStatus)
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 func prepareEventStream(format, model string, created int64, events <-chan TurnEvent) (*PreparedStream, error) {

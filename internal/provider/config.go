@@ -24,6 +24,8 @@ type Config struct {
 	ClientVersion          string            `yaml:"client_version" json:"client_version"`
 	AllowedNativeTools     []string          `yaml:"allowed_native_tools" json:"allowed_native_tools"`
 	RequestTimeoutSeconds  int               `yaml:"request_timeout_seconds" json:"request_timeout_seconds"`
+	TransientRetryCount    int               `yaml:"transient_retry_count" json:"transient_retry_count"`
+	TransientRetryDelayMS  int               `yaml:"transient_retry_delay_ms" json:"transient_retry_delay_ms"`
 	ModelCacheTTLSeconds   int               `yaml:"model_cache_ttl_seconds" json:"model_cache_ttl_seconds"`
 	ContinuationPrompt     string            `yaml:"continuation_prompt" json:"continuation_prompt"`
 	MaxRequestBytes        int               `yaml:"max_request_bytes" json:"max_request_bytes"`
@@ -42,6 +44,8 @@ func DefaultConfig() Config {
 		ClientVersion:          "cli-2026.08.11-e8db854",
 		AllowedNativeTools:     []string{"mcp_tool_call"},
 		RequestTimeoutSeconds:  300,
+		TransientRetryCount:    1,
+		TransientRetryDelayMS:  250,
 		ModelCacheTTLSeconds:   600,
 		ContinuationPrompt:     "Continue, using the tool results above.",
 		MaxRequestBytes:        64 << 20,
@@ -83,6 +87,12 @@ func ParseConfig(raw []byte) (Config, error) {
 	if cfg.RequestTimeoutSeconds < 1 || cfg.RequestTimeoutSeconds > 1800 {
 		return Config{}, fmt.Errorf("request_timeout_seconds must be between 1 and 1800")
 	}
+	if cfg.TransientRetryCount < 0 || cfg.TransientRetryCount > 3 {
+		return Config{}, fmt.Errorf("transient_retry_count must be between 0 and 3")
+	}
+	if cfg.TransientRetryDelayMS < 0 || cfg.TransientRetryDelayMS > 5000 {
+		return Config{}, fmt.Errorf("transient_retry_delay_ms must be between 0 and 5000")
+	}
 	if cfg.ModelCacheTTLSeconds < 0 || cfg.ModelCacheTTLSeconds > 86400 {
 		return Config{}, fmt.Errorf("model_cache_ttl_seconds must be between 0 and 86400")
 	}
@@ -104,6 +114,10 @@ func (c Config) ModelDisplayName(modelID, fallback string) string {
 
 func (c Config) RequestTimeout() time.Duration {
 	return time.Duration(c.RequestTimeoutSeconds) * time.Second
+}
+
+func (c Config) TransientRetryDelay() time.Duration {
+	return time.Duration(c.TransientRetryDelayMS) * time.Millisecond
 }
 
 func (c Config) ModelCacheTTL() time.Duration {

@@ -357,6 +357,8 @@ func pluginRegistration() registration {
 				{Name: "model_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"raw", "normalized", "both"}, Description: "Cursor model catalog compatibility mode."},
 				{Name: "default_reasoning_effort", Type: pluginapi.ConfigFieldTypeString, Description: "Default effort for normalized model families."},
 				{Name: "model_display_names", Type: pluginapi.ConfigFieldTypeObject, Description: "Exact Cursor model ID to catalog display-name mappings."},
+				{Name: "transient_retry_count", Type: pluginapi.ConfigFieldTypeInteger, Description: "Retries before stream commitment for transient Cursor 408/5xx and transport failures (0-3)."},
+				{Name: "transient_retry_delay_ms", Type: pluginapi.ConfigFieldTypeInteger, Description: "Initial delay in milliseconds between transient retries (0-5000)."},
 			},
 		},
 		Capabilities: registrationCapability{

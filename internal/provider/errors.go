@@ -75,9 +75,21 @@ func cursorStatusError(raw []byte, fallbackStatus int) *StatusError {
 	if message == "" {
 		message = http.StatusText(status)
 	}
+	if isTransientHTTPStatus(status) {
+		retryable = true
+	}
 	retryAfter := time.Duration(0)
 	if !resetAt.IsZero() && resetAt.After(time.Now()) {
 		retryAfter = time.Until(resetAt)
 	}
 	return &StatusError{Code: firstNonEmpty(code, "cursor_upstream_error"), Message: message, HTTPStatus: status, Retryable: retryable, RetryAfter: retryAfter}
+}
+
+func isTransientHTTPStatus(status int) bool {
+	switch status {
+	case http.StatusRequestTimeout, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
 }
