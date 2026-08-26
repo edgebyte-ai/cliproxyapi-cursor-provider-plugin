@@ -12,6 +12,7 @@ Current target capabilities:
 - `resource_exhausted`, reset metadata and retry/cooldown propagation;
 - `cursor-native` and `other-models` quota groups through a management route.
 - a plugin-owned browser editor for each account's priority, prefix, allow rules, and deny rules.
+- configurable exact model ID to catalog display-name mappings.
 
 The plugin is MIT licensed. Credentials belong in CLIProxyAPI's private auth directory and must never be committed.
 
@@ -21,6 +22,16 @@ Naming is intentionally split by responsibility:
 - plugin ID and binary: `cliproxyapi-cursor-provider`;
 - provider/auth type and OAuth alias channel: `cursor` (shown as `Cursor` in Auth Files);
 - quota groups: `cursor-native` and `other-models`.
+
+Catalog display names can be customized without changing model IDs or upstream routing:
+
+```yaml
+model_display_names:
+  cursor-grok-4.5: "Grok 4.5"
+  cursor-grok-4.6: "Grok 4.6"
+```
+
+The mapping key is the Cursor model ID after effort normalization and before CLIProxyAPI OAuth aliases are applied. Matching is case-insensitive. The Plugin **Edit config** form exposes the field as a JSON object.
 
 ## Development
 

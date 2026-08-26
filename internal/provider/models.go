@@ -138,7 +138,8 @@ func (s *Service) modelInfos(models []CursorModel, storage AuthStorage) []plugin
 	out := make([]pluginapi.ModelInfo, 0, len(models))
 	if cfg.ModelMode == "raw" || cfg.ModelMode == "both" {
 		for _, model := range models {
-			out = append(out, pluginModelInfo(cfg.ModelPrefix+model.ID, model.ID, model.DisplayName, nil, created))
+			displayName := cfg.ModelDisplayName(model.ID, model.DisplayName)
+			out = append(out, pluginModelInfo(cfg.ModelPrefix+model.ID, model.ID, displayName, nil, created))
 		}
 	}
 	if cfg.ModelMode == "normalized" || cfg.ModelMode == "both" {
@@ -150,7 +151,8 @@ func (s *Service) modelInfos(models []CursorModel, storage AuthStorage) []plugin
 		sort.Strings(keys)
 		for _, key := range keys {
 			family := families[key]
-			out = append(out, pluginModelInfo(cfg.ModelPrefix+family.ID, family.ID, family.DisplayName, family, created))
+			displayName := cfg.ModelDisplayName(family.ID, family.DisplayName)
+			out = append(out, pluginModelInfo(cfg.ModelPrefix+family.ID, family.ID, displayName, family, created))
 		}
 	}
 	return out

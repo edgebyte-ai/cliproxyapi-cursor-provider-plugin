@@ -27,6 +27,28 @@ func TestNormalizedFamiliesKeepThinkingAndFastDimensions(t *testing.T) {
 	}
 }
 
+func TestModelInfosApplyDisplayNameMappingAfterNormalization(t *testing.T) {
+	service := New()
+	if err := service.Configure([]byte("model_display_names:\n  cursor-grok-4.6: Grok 4.6\n  composer-2.5: Composer Custom\n")); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	models := []CursorModel{
+		{ID: "cursor-grok-4.6-high", DisplayName: "Cursor Grok 4.6 High"},
+		{ID: "composer-2.5", DisplayName: "Composer 2.5"},
+	}
+	infos := service.modelInfos(models, AuthStorage{})
+	byID := make(map[string]string, len(infos))
+	for _, info := range infos {
+		byID[info.ID] = info.DisplayName
+	}
+	if byID["cursor-grok-4.6"] != "Grok 4.6" {
+		t.Fatalf("Grok display name = %q", byID["cursor-grok-4.6"])
+	}
+	if byID["composer-2.5"] != "Composer Custom" {
+		t.Fatalf("Composer display name = %q", byID["composer-2.5"])
+	}
+}
+
 func TestResolveFixedModelRejectsReasoningEffort(t *testing.T) {
 	service := New()
 	service.modelCache["account"] = cachedModels{models: []CursorModel{{ID: "composer-2.5"}}, expiresAt: service.now().Add(service.Config().ModelCacheTTL())}
