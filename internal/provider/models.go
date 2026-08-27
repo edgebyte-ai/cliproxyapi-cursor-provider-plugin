@@ -244,9 +244,6 @@ func (s *Service) resolveModel(ctx context.Context, storage AuthStorage, request
 	cfg := s.Config()
 	requested = strings.TrimPrefix(strings.TrimSpace(requested), cfg.ModelPrefix)
 	families := normalizedFamilies(models, cfg.DefaultReasoningEffort)
-	if family := families[requested]; family != nil && len(family.Variants) == 0 && strings.TrimSpace(effort) != "" && cfg.ModelMode != "raw" {
-		return "", &StatusError{Code: "unsupported_reasoning_effort", Message: "reasoning effort is not supported by this Cursor model", HTTPStatus: http.StatusBadRequest}
-	}
 	for _, model := range models {
 		if strings.EqualFold(model.ID, requested) {
 			if cfg.ModelMode == "normalized" {
