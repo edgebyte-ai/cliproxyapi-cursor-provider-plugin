@@ -2,8 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"testing"
 )
 
@@ -49,13 +47,12 @@ func TestModelInfosApplyDisplayNameMappingAfterNormalization(t *testing.T) {
 	}
 }
 
-func TestResolveFixedModelRejectsReasoningEffort(t *testing.T) {
+func TestResolveFixedModelIgnoresReasoningEffort(t *testing.T) {
 	service := New()
 	service.modelCache["account"] = cachedModels{models: []CursorModel{{ID: "composer-2.5"}}, expiresAt: service.now().Add(service.Config().ModelCacheTTL())}
-	_, err := service.resolveModel(context.Background(), AuthStorage{ID: "account"}, "composer-2.5", "high")
-	var statusErr *StatusError
-	if !errors.As(err, &statusErr) || statusErr.HTTPStatus != http.StatusBadRequest || statusErr.Code != "unsupported_reasoning_effort" {
-		t.Fatalf("unexpected error: %v", err)
+	got, err := service.resolveModel(context.Background(), AuthStorage{ID: "account"}, "composer-2.5", "high")
+	if err != nil || got != "composer-2.5" {
+		t.Fatalf("resolveModel() = %q, %v", got, err)
 	}
 }
 
