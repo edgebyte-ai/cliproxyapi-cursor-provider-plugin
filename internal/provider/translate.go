@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/pb"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -79,6 +81,19 @@ func turnInput(format string, root map[string]any, cfg Config) (TurnInput, error
 		if !ok {
 			continue
 		}
+		if strings.EqualFold(stringValue(message["type"]), "agent_message") {
+			var opaque bool
+			userText, opaque = agentMessageText(message["content"])
+			if opaque {
+				return TurnInput{}, &StatusError{
+					Code:       "unsupported_encrypted_agent_message",
+					Message:    "Codex agent task content is encrypted and cannot be forwarded to Cursor",
+					HTTPStatus: http.StatusUnprocessableEntity,
+				}
+			}
+			activeIndex = index
+			break
+		}
 		if strings.EqualFold(stringValue(message["role"]), "user") {
 			userText = contentText(message["content"])
 			activeIndex = index
@@ -117,6 +132,12 @@ func normalizeHistoryMessages(messages []any) []any {
 		itemType := strings.ToLower(stringValue(message["type"]))
 		role := strings.ToLower(stringValue(message["role"]))
 		switch itemType {
+		case "agent_message":
+			text, opaque := agentMessageText(message["content"])
+			if text != "" && !opaque {
+				out = append(out, map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": text}}})
+			}
+			continue
 		case "function_call":
 			callID := firstNonEmpty(stringValue(message["call_id"]), stringValue(message["id"]), normalizeToolCallID(""))
 			out = append(out, map[string]any{"role": "assistant", "content": []any{map[string]any{
@@ -168,6 +189,63 @@ func normalizeHistoryMessages(messages []any) []any {
 		}
 	}
 	return out
+}
+
+// agentMessageText decodes Codex native-subagent messages. Codex currently
+// places the task payload in a content part named encrypted_content even when
+// the value delivered to an OpenAI-compatible provider is plain text. Opaque
+// values are rejected instead of silently dropping the task and asking Cursor
+// to continue an unrelated workspace conversation.
+func agentMessageText(value any) (string, bool) {
+	list, _ := value.([]any)
+	parts := make([]string, 0, len(list))
+	opaque := false
+	for _, item := range list {
+		part, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(stringValue(part["type"])) {
+		case "encrypted_content":
+			payload := stringValue(part["encrypted_content"])
+			if payload == "" {
+				continue
+			}
+			if !looksLikePlaintextTask(payload) {
+				opaque = true
+				continue
+			}
+			parts = append(parts, payload)
+		default:
+			if text := firstNonEmpty(stringValue(part["text"]), stringValue(part["content"])); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n"), opaque
+}
+
+func looksLikePlaintextTask(value string) bool {
+	if !utf8.ValidString(value) || strings.TrimSpace(value) == "" {
+		return false
+	}
+	base64Like := true
+	hasSpace := false
+	for _, r := range value {
+		if !unicode.IsPrint(r) && !unicode.IsSpace(r) {
+			return false
+		}
+		if unicode.IsSpace(r) {
+			hasSpace = true
+		}
+		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '+' && r != '/' && r != '-' && r != '_' && r != '=' {
+			base64Like = false
+		}
+	}
+	if !hasSpace && base64Like && (strings.HasSuffix(value, "=") || len(value) >= 48) {
+		return false
+	}
+	return true
 }
 
 func parseArgumentValue(value any) any {
