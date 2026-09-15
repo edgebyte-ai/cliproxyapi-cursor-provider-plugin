@@ -115,7 +115,7 @@ Check models and each account's quota:
 curl -sS -H "Authorization: Bearer $API_KEY" http://127.0.0.1:8317/v1/models
 curl -sS -H "Authorization: Bearer $MANAGEMENT_KEY" http://127.0.0.1:8317/v0/management/auth-files
 curl -sS -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  "http://127.0.0.1:8317/v0/management/plugins/cursor-provider/quota?auth_index=$AUTH_INDEX"
+  "http://127.0.0.1:8317/v0/management/plugins/cursor-provider/quota-details?auth_index=$AUTH_INDEX"
 ```
 
 The browser quota page is:
@@ -125,6 +125,34 @@ The browser quota page is:
 ```
 
 Its management key is stored only in that tab's `sessionStorage`; a 401 clears it, and closing the tab discards it.
+
+### CPA quota API compatibility
+
+CPA's quota-provider API reserves `/v0/management/plugins/:id/quota`. On
+hosts with that API, the old `/plugins/cursor-provider/quota` URL is intercepted
+before it reaches this plugin, producing `quota provider not found for plugin`.
+The Cursor Quota page now uses `/plugins/cursor-provider/quota-details`, which
+also works on older hosts. Reload any already-open Cursor Quota tab after
+updating the plugin so it uses the new URL.
+
+On hosts supporting quota providers, this plugin also registers `cursor` with
+the standard quota ABI. These endpoints use the full plugin ID:
+
+```sh
+curl -sS -H "Authorization: Bearer $MANAGEMENT_KEY" \
+  http://127.0.0.1:8317/v0/management/quota/providers
+curl -sS -H "Authorization: Bearer $MANAGEMENT_KEY" \
+  "http://127.0.0.1:8317/v0/management/plugins/cliproxyapi-cursor-provider/quota?auth_index=$AUTH_INDEX"
+```
+
+The standard response contains `subscription` and `groups`, with `cursor-native`
+and `other-models` buckets. The plugin-owned `quota-details` response retains
+the original `quota` rows used by the Cursor Quota page. Unknown usage does not
+become a zero-remaining bucket. Quota reset is not supported.
+
+The additive JSON quota ABI is implemented without raising the existing
+`v7.2.141` SDK dependency. Older hosts ignore the capability and continue using
+the plugin-owned quota page and management route.
 
 ## Rollback
 

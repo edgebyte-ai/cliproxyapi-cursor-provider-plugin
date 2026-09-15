@@ -36,6 +36,7 @@ type registrationCapability struct {
 	ExecutorInputFormats  []string                     `json:"executor_input_formats"`
 	ExecutorOutputFormats []string                     `json:"executor_output_formats"`
 	ManagementAPI         bool                         `json:"management_api"`
+	QuotaProvider         bool                         `json:"quota_provider"`
 }
 
 type identifierResponse struct {
@@ -136,6 +137,18 @@ func dispatch(method string, request []byte) (any, error) {
 		return pluginRegistration(), nil
 	case pluginabi.MethodAuthIdentifier, pluginabi.MethodExecutorIdentifier:
 		return identifierResponse{Identifier: provider.ProviderID}, nil
+	case methodQuotaIdentifier:
+		return identifierResponse{Identifier: provider.ProviderID}, nil
+	case methodQuotaDescribe:
+		return quotaDescribeResponse{SupportedProviders: []string{provider.ProviderID}, DisplayName: "Cursor", SupportsReset: false}, nil
+	case methodQuotaFetch:
+		var req quotaFetchRequest
+		if err := json.Unmarshal(request, &req); err != nil {
+			return nil, err
+		}
+		return (quotaRPC{hostCall: callHost, fetch: pluginService.Quota}).fetchQuota(ctx, req)
+	case methodQuotaReset:
+		return quotaResetResponse{Success: false, Message: "Cursor subscription quota cannot be reset by this plugin"}, nil
 	case pluginabi.MethodAuthParse:
 		var req pluginapi.AuthParseRequest
 		if err := json.Unmarshal(request, &req); err != nil {
@@ -216,6 +229,7 @@ func dispatch(method string, request []byte) (any, error) {
 	case pluginabi.MethodManagementRegister:
 		return rpcManagementRegistrationResponse{
 			Routes: []rpcManagementRoute{
+				{Method: http.MethodGet, Path: cursorQuotaDetailsPath, Description: "Cursor quota groups for one auth_index"},
 				{Method: http.MethodGet, Path: "/plugins/cursor-provider/quota", Description: "Cursor quota groups for one auth_index"},
 				{Method: http.MethodGet, Path: "/plugins/cursor-provider/account-policy", Description: "Read one Cursor account model policy and priority"},
 			},
@@ -249,7 +263,7 @@ func handleManagement(ctx context.Context, req rpcManagementRequest) (pluginapi.
 	if req.Method == http.MethodGet && strings.HasSuffix(req.Path, "/plugins/cursor-provider/account-policy") {
 		return getAccountPolicy(req)
 	}
-	if req.Method != http.MethodGet || !strings.HasSuffix(req.Path, "/plugins/cursor-provider/quota") {
+	if req.Method != http.MethodGet || !(strings.HasSuffix(req.Path, cursorQuotaDetailsPath) || strings.HasSuffix(req.Path, "/plugins/cursor-provider/quota")) {
 		return pluginapi.ManagementResponse{StatusCode: http.StatusNotFound, Body: []byte(`{"error":"not found"}`)}, nil
 	}
 	authIndex := strings.TrimSpace(req.Query.Get("auth_index"))
@@ -340,7 +354,7 @@ const rules=v=>(Array.isArray(v)?v:[]).join('\n');
 const parseRules=v=>{const seen=new Set;return String(v||'').split(/\r?\n/).map(x=>x.trim().toLowerCase()).filter(x=>x&&!seen.has(x)&&(seen.add(x),true))};
 function quotaRows(q){if(q?.error)return '<div class="error">'+esc(q.error)+'</div>';return (q?.quota||[]).map(x=>{const used=Number(x.usedPercent),remain=Number.isFinite(used)?Math.max(0,100-used):0;return '<div class="quota"><span>'+esc(x.key)+'</span><div class="bar"><div class="fill '+(remain<20?'danger':'')+'" style="width:'+remain+'%"></div></div><strong>'+remain.toFixed(1)+'%</strong></div>'}).join('')}
 function card(x,i){const a=x.a,p=x.p;if(p?.error)return '<section class="card"><div class="title"><div class="identity"><strong>'+esc(a.label||a.name)+'</strong><small>'+esc(a.name)+'</small></div></div>'+quotaRows(x.q)+'<div class="error">'+esc(p.error)+'</div></section>';return '<section class="card"><div class="title"><div class="identity"><strong>'+esc(p.label||a.label||a.name)+'</strong><small>'+esc(p.name||a.name)+'</small></div><span>P'+esc(p.priority)+'</span></div>'+quotaRows(x.q)+'<div class="policy"><h2>Account policy</h2><div class="policy-grid"><label class="field"><span>Priority</span><input id="priority-'+i+'" type="number" step="1" value="'+esc(p.priority)+'"><span class="field-hint">Higher values are selected first.</span></label><label class="field"><span>Model prefix</span><input id="prefix-'+i+'" value="'+esc(p.prefix)+'"><span class="field-hint">Leave empty for unprefixed model names.</span></label><label class="field"><span>Allowed model rules</span><textarea id="allowed-'+i+'" spellcheck="false">'+esc(rules(p.allowed_models))+'</textarea><span class="field-hint">One rule per line. Empty means all models are allowed before deny rules.</span></label><label class="field"><span>Denied model rules</span><textarea id="denied-'+i+'" spellcheck="false">'+esc(rules(p.denied_models))+'</textarea><span class="field-hint">One rule per line. Deny rules take precedence. * is supported.</span></label></div><div class="policy-actions"><button id="save-'+i+'" onclick="savePolicy('+i+')">Save account policy</button><span id="status-'+i+'" class="status"></span></div></div></section>'}
-async function load(){if(!key.value){out.innerHTML='<div class="error">Enter the management key.</div>';return}sessionStorage.setItem(storageKey,key.value);out.innerHTML='Loading…';try{const auth=await api('/v0/management/auth-files'),rows=(auth.files||[]).filter(x=>x.type==='cursor');accounts=await Promise.all(rows.map(async a=>{const query='?auth_index='+encodeURIComponent(a.auth_index);const [q,p]=await Promise.all([api('/v0/management/plugins/cursor-provider/quota'+query).catch(e=>({error:e.message})),api(policyPath+query).catch(e=>({error:e.message}))]);return{a,q,p}}));out.innerHTML=accounts.length?accounts.map(card).join(''):'<div class="error">No Cursor auth files found.</div>'}catch(e){out.innerHTML='<div class="error">'+esc(e.message)+'</div>'}}
+async function load(){if(!key.value){out.innerHTML='<div class="error">Enter the management key.</div>';return}sessionStorage.setItem(storageKey,key.value);out.innerHTML='Loading…';try{const auth=await api('/v0/management/auth-files'),rows=(auth.files||[]).filter(x=>x.type==='cursor');accounts=await Promise.all(rows.map(async a=>{const query='?auth_index='+encodeURIComponent(a.auth_index);const [q,p]=await Promise.all([api('/v0/management/plugins/cursor-provider/quota-details'+query).catch(e=>({error:e.message})),api(policyPath+query).catch(e=>({error:e.message}))]);return{a,q,p}}));out.innerHTML=accounts.length?accounts.map(card).join(''):'<div class="error">No Cursor auth files found.</div>'}catch(e){out.innerHTML='<div class="error">'+esc(e.message)+'</div>'}}
 async function savePolicy(i){const x=accounts[i],status=document.getElementById('status-'+i),button=document.getElementById('save-'+i),priority=Number(document.getElementById('priority-'+i).value);if(!Number.isSafeInteger(priority)){status.className='error';status.textContent='Priority must be an integer.';return}button.disabled=true;status.className='status';status.textContent='Saving…';try{await api('/v0/management/auth-files/fields',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:x.p.name,priority,prefix:document.getElementById('prefix-'+i).value,allowed_models:parseRules(document.getElementById('allowed-'+i).value),denied_models:parseRules(document.getElementById('denied-'+i).value)})});status.textContent='Saved. Reloading…';await load()}catch(e){status.className='error';status.textContent=e.message;button.disabled=false}}
 document.getElementById('load').onclick=load;if(key.value)load();
 </script></body></html>`
@@ -367,6 +381,7 @@ func pluginRegistration() registration {
 			ExecutorInputFormats:  []string{"openai", "openai-response", "claude"},
 			ExecutorOutputFormats: []string{"openai", "openai-response", "claude"},
 			ManagementAPI:         true,
+			QuotaProvider:         true,
 		},
 	}
 }

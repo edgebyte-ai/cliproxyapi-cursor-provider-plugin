@@ -10,7 +10,7 @@ Current target capabilities:
 - caller-owned tool calls and real streaming through the plugin host callback;
 - normalized `reasoning_effort` model families;
 - `resource_exhausted`, reset metadata and retry/cooldown propagation;
-- `cursor-native` and `other-models` quota groups through a management route.
+- `cursor-native` and `other-models` quota groups through the Cursor Quota page and CPA's standard quota-provider API.
 - a plugin-owned browser editor for each account's priority, prefix, allow rules, and deny rules.
 
 Transient Cursor gateway and transport failures are retried before the plugin
