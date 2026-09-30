@@ -237,12 +237,25 @@ func handleServerMessage(message *pb.AgentServerMessage, blobs map[string][]byte
 			client := &pb.ExecClientMessage{Id: execMessage.GetId(), ExecId: execMessage.GetExecId(), Message: &pb.ExecClientMessage_RequestContextResult{RequestContextResult: result}}
 			return send(&pb.AgentClientMessage{Message: &pb.AgentClientMessage_ExecClientMessage{ExecClientMessage: client}})
 		}
+		if execMessage.GetMcpStateExecArgs() != nil {
+			// The MCP discovery meta-tool refreshes the caller's tool catalog
+			// through this exec request before invoking an MCP function.
+			servers := []*pb.McpStateServer{}
+			if len(tools) > 0 {
+				servers = append(servers, &pb.McpStateServer{
+					ServerName: "openai-caller", ServerIdentifier: "openai-caller", Tools: tools,
+				})
+			}
+			result := &pb.McpStateExecResult{Result: &pb.McpStateExecResult_Success{Success: &pb.McpStateSuccess{Servers: servers}}}
+			client := &pb.ExecClientMessage{Id: execMessage.GetId(), ExecId: execMessage.GetExecId(), Message: &pb.ExecClientMessage_McpStateExecResult{McpStateExecResult: result}}
+			return send(&pb.AgentClientMessage{Message: &pb.AgentClientMessage_ExecClientMessage{ExecClientMessage: client}})
+		}
 		if args := execMessage.GetMcpArgs(); args != nil {
 			decoded := make(map[string]any, len(args.GetArgs()))
 			for key, value := range args.GetArgs() {
 				decoded[key] = decodeValue(value)
 			}
-			events <- TurnEvent{Type: "tool_call", ToolCallID: normalizeToolCallID(args.GetToolCallId()), ToolName: firstNonEmpty(args.GetName(), args.GetToolName(), "unknown"), ToolArgs: decoded}
+			events <- TurnEvent{Type: "tool_call", ToolCallID: normalizeToolCallID(args.GetToolCallId()), ToolName: firstNonEmpty(args.GetToolName(), args.GetName(), "unknown"), ToolArgs: decoded}
 			events <- TurnEvent{Type: "done", DoneReason: "tool_calls"}
 			return errTurnFinished
 		}

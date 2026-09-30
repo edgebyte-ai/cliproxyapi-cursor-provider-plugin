@@ -42,7 +42,7 @@ func DefaultConfig() Config {
 		ModelDisplayNames:      map[string]string{},
 		CursorBaseURL:          "https://api2.cursor.sh",
 		ClientVersion:          "cli-2026.08.11-e8db854",
-		AllowedNativeTools:     []string{"mcp_tool_call"},
+		AllowedNativeTools:     []string{"mcp_tool_call", "get_mcp_tools_tool_call"},
 		RequestTimeoutSeconds:  300,
 		TransientRetryCount:    1,
 		TransientRetryDelayMS:  250,
@@ -66,6 +66,11 @@ func ParseConfig(raw []byte) (Config, error) {
 	}
 	if cfg.ProviderID != ProviderID {
 		return Config{}, fmt.Errorf("provider_id must be %q", ProviderID)
+	}
+	// Cursor's MCP meta-tool requires discovery even when callers configured
+	// the older MCP-only allowlist. An empty list still disables filtering.
+	if len(cfg.AllowedNativeTools) > 0 && !contains(cfg.AllowedNativeTools, "get_mcp_tools_tool_call") {
+		cfg.AllowedNativeTools = append(cfg.AllowedNativeTools, "get_mcp_tools_tool_call")
 	}
 	cfg.ModelMode = strings.ToLower(strings.TrimSpace(cfg.ModelMode))
 	if cfg.ModelMode != "raw" && cfg.ModelMode != "normalized" && cfg.ModelMode != "both" {

@@ -1,10 +1,35 @@
 package provider
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestParseConfigPreservesRequiredMCPDiscoveryTool(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"default", "", []string{"mcp_tool_call", "get_mcp_tools_tool_call"}},
+		{"legacy", "allowed_native_tools: [mcp_tool_call]", []string{"mcp_tool_call", "get_mcp_tools_tool_call"}},
+		{"custom", "allowed_native_tools: [mcp_tool_call, read_tool_call]", []string{"mcp_tool_call", "read_tool_call", "get_mcp_tools_tool_call"}},
+		{"already present", "allowed_native_tools: [mcp_tool_call, get_mcp_tools_tool_call]", []string{"mcp_tool_call", "get_mcp_tools_tool_call"}},
+		{"no filtering", "allowed_native_tools: []", []string{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := ParseConfig([]byte(tt.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(cfg.AllowedNativeTools, tt.want) {
+				t.Fatalf("AllowedNativeTools = %v, want %v", cfg.AllowedNativeTools, tt.want)
+			}
+		})
+	}
+}
 
 func TestProviderIDAndConfigAreCursor(t *testing.T) {
 	if ProviderID != "cursor" {
