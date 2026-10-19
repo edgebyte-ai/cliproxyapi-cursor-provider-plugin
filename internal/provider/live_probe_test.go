@@ -1,12 +1,11 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -25,9 +24,12 @@ func TestLiveCursorTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := New()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	events, err := service.runTurn(ctx, storage, "composer-2.5", TurnInput{UserText: "Reply with exactly LIVE_CURSOR_PLUGIN_OK"})
+	ctx := context.Background()
+	model, err := service.resolveModel(ctx, storage, "composer-2.5", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := service.runTurn(ctx, storage, model, TurnInput{UserText: "Reply with exactly LIVE_CURSOR_PLUGIN_OK"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,16 +53,34 @@ func TestLiveCursorExecutor(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := New()
-	requestBody := []byte(`{"model":"composer-2.5","messages":[{"role":"user","content":"Reply with exactly LIVE_EXECUTOR_OK"}],"stream":false}`)
+	model := firstNonEmpty(os.Getenv("CURSOR_PLUGIN_LIVE_MODEL"), "composer-2.5")
+	requestBody, err := json.Marshal(map[string]any{
+		"model": model, "messages": []map[string]string{{"role": "user", "content": "What is 2 + 2?"}},
+		"stream": false, "reasoning_effort": firstNonEmpty(os.Getenv("CURSOR_PLUGIN_LIVE_EFFORT"), "low"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	response, err := service.Execute(context.Background(), pluginapi.ExecutorRequest{
-		AuthID: "live", AuthProvider: ProviderID, Model: "composer-2.5",
+		AuthID: "live", AuthProvider: ProviderID, Model: model,
 		Format: "openai", SourceFormat: "openai", OriginalRequest: requestBody, Payload: requestBody, StorageJSON: raw,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("payload=%s", response.Payload)
-	if !bytes.Contains(response.Payload, []byte("LIVE_EXECUTOR_OK")) {
-		t.Fatal("executor response did not contain expected text")
+	var result struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
+	if err := json.Unmarshal(response.Payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Choices) != 1 || result.Choices[0].FinishReason != "stop" || !strings.Contains(result.Choices[0].Message.Content, "4") {
+		t.Fatalf("unexpected final answer: %+v", result)
+	}
+	t.Logf("model=%s answer=%q", model, result.Choices[0].Message.Content)
 }

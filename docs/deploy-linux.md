@@ -49,7 +49,7 @@ plugins:
         cursor-grok-4.5: "Grok 4.5"
         cursor-grok-4.6: "Grok 4.6"
       cursor_base_url: "https://api2.cursor.sh"
-      client_version: "cli-2026.08.11-e8db854"
+      client_version: "cli-2026.10.16-e3cb207"
       allowed_native_tools: ["mcp_tool_call", "get_mcp_tools_tool_call"]
       request_timeout_seconds: 300
       transient_retry_count: 1

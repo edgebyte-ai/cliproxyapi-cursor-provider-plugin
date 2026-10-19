@@ -30,6 +30,16 @@ Naming is intentionally split by responsibility:
 - provider/auth type and OAuth alias channel: `cursor` (shown as `Cursor` in Auth Files);
 - quota groups: `cursor-native` and `other-models`.
 
+Model discovery uses Cursor's parameterized `aiserver.v1.AiService/AvailableModels`
+catalog for each account. Inference sends only `RequestedModel`, including the
+catalog's context, reasoning, thinking and fast parameters. The old
+`GetUsableModels` catalog and `ModelDetails` request path are not used, including
+when the new catalog fails. Account allow/deny rules still apply to the catalog
+variant IDs; non-max variants retain their catalog slugs for public model naming.
+Normalized families select the configured reasoning effort while preserving the
+other parameters of that exact variant. Models such as Auto use the catalog's
+non-max default parameter set. Fast variants remain subject to account deny rules.
+
 Catalog display names can be customized without changing model IDs or upstream routing:
 
 ```yaml

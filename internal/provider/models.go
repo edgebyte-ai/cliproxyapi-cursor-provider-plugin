@@ -14,11 +14,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var reasoningLevels = []string{"low", "medium", "high", "xhigh", "max"}
+var reasoningLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 type CursorModel struct {
 	ID          string
 	DisplayName string
+	Selection   *pb.RequestedModel
 }
 
 type normalizedFamily struct {
@@ -58,28 +59,9 @@ func (s *Service) discoverModels(ctx context.Context, storage AuthStorage) ([]Cu
 	}
 	s.modelMu.Unlock()
 
-	reqBody, _ := proto.Marshal(&pb.GetUsableModelsRequest{})
-	responseBody, _, err := unaryProto(ctx, "/agent.v1.AgentService/GetUsableModels", reqBody, storage.AccessToken, s.Config(), 30*time.Second)
+	models, err := fetchAvailableModels(ctx, storage.AccessToken, s.Config(), newH2Client(30*time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("discover Cursor models: %w", err)
-	}
-	var response pb.GetUsableModelsResponse
-	if err := proto.Unmarshal(responseBody, &response); err != nil {
-		return nil, fmt.Errorf("decode Cursor model catalog: %w", err)
-	}
-	models := make([]CursorModel, 0, len(response.Models))
-	seen := make(map[string]struct{}, len(response.Models))
-	for _, model := range response.Models {
-		id := strings.TrimSpace(model.GetModelId())
-		if id == "" {
-			continue
-		}
-		key := strings.ToLower(id)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		models = append(models, CursorModel{ID: id, DisplayName: firstNonEmpty(model.GetDisplayName(), model.GetDisplayNameShort(), id)})
 	}
 	models = filterModels(models, storage)
 	if len(models) == 0 {
@@ -209,7 +191,7 @@ func normalizedFamilies(models []CursorModel, preferred string) map[string]*norm
 		if _, ok := family.Variants[preferred]; ok {
 			family.DefaultEffort = preferred
 		} else {
-			for _, effort := range []string{"high", "medium", "low", "xhigh", "max"} {
+			for _, effort := range []string{"high", "medium", "low", "xhigh", "max", "minimal", "none"} {
 				if _, ok := family.Variants[effort]; ok {
 					family.DefaultEffort = effort
 					break
@@ -236,10 +218,10 @@ func splitEffort(id string) (string, string, bool) {
 	return id, "", false
 }
 
-func (s *Service) resolveModel(ctx context.Context, storage AuthStorage, requested, effort string) (string, error) {
+func (s *Service) resolveModel(ctx context.Context, storage AuthStorage, requested, effort string) (*pb.RequestedModel, error) {
 	models, err := s.discoverModels(ctx, storage)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	cfg := s.Config()
 	requested = strings.TrimPrefix(strings.TrimSpace(requested), cfg.ModelPrefix)
@@ -248,24 +230,29 @@ func (s *Service) resolveModel(ctx context.Context, storage AuthStorage, request
 		if strings.EqualFold(model.ID, requested) {
 			if cfg.ModelMode == "normalized" {
 				if _, _, suffixed := splitEffort(model.ID); suffixed {
-					return "", &StatusError{Code: "raw_effort_model_disabled", Message: "raw effort-suffixed Cursor model is disabled", HTTPStatus: http.StatusBadRequest}
+					return nil, &StatusError{Code: "raw_effort_model_disabled", Message: "raw effort-suffixed Cursor model is disabled", HTTPStatus: http.StatusBadRequest}
 				}
 			}
-			return model.ID, nil
+			return proto.Clone(model.Selection).(*pb.RequestedModel), nil
 		}
 	}
 	family := families[requested]
 	if family == nil || len(family.Variants) == 0 {
-		return "", &StatusError{Code: "model_not_found", Message: "Cursor model is not available for this account", HTTPStatus: http.StatusNotFound}
+		return nil, &StatusError{Code: "model_not_found", Message: "Cursor model is not available for this account", HTTPStatus: http.StatusNotFound}
 	}
 	if effort == "" {
 		effort = family.DefaultEffort
 	}
 	upstreamID, ok := family.Variants[strings.ToLower(effort)]
 	if !ok {
-		return "", &StatusError{Code: "unsupported_reasoning_effort", Message: "reasoning effort is not supported by this Cursor model", HTTPStatus: http.StatusBadRequest}
+		return nil, &StatusError{Code: "unsupported_reasoning_effort", Message: "reasoning effort is not supported by this Cursor model", HTTPStatus: http.StatusBadRequest}
 	}
-	return upstreamID, nil
+	for _, model := range models {
+		if model.ID == upstreamID {
+			return proto.Clone(model.Selection).(*pb.RequestedModel), nil
+		}
+	}
+	return nil, fmt.Errorf("Cursor model variant %q is missing from the catalog", upstreamID)
 }
 
 func contains(values []string, value string) bool {

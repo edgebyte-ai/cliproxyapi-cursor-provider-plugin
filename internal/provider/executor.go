@@ -68,7 +68,7 @@ func (s *Service) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (p
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
 	}
-	return pluginapi.ExecutorResponse{Payload: payload, Headers: jsonHeaders(), Metadata: map[string]any{"cursor_model": model, "reasoning_effort": parsed.Effort}}, nil
+	return pluginapi.ExecutorResponse{Payload: payload, Headers: jsonHeaders(), Metadata: map[string]any{"cursor_model": model.GetModelId(), "reasoning_effort": parsed.Effort}}, nil
 }
 
 func (s *Service) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequest, emit func([]byte) error) (http.Header, error) {

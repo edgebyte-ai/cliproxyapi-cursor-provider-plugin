@@ -57,3 +57,22 @@ func TestMCPCallPreservesCallerNameAfterDiscovery(t *testing.T) {
 		t.Fatalf("unexpected completion: %+v", done)
 	}
 }
+
+func TestRunRequestSendsParameterizedSelectionWithoutModelDetails(t *testing.T) {
+	model := decodeTestCatalog(t, parameterizedCatalog)[1].Selection
+	request := newRunRequest(model, [][]byte{[]byte("root")}, &pb.ConversationAction{}, "conversation", []*pb.McpToolDefinition{{Name: "weather"}})
+	raw, err := proto.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded pb.AgentRunRequest
+	if err := proto.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.GetModelDetails() != nil || !proto.Equal(decoded.GetRequestedModel(), model) {
+		t.Fatalf("unexpected wire model selection: %v", &decoded)
+	}
+	if len(decoded.GetConversationState().GetRootPromptMessagesJson()) != 1 || decoded.GetConversationId() != "conversation" || len(decoded.GetMcpTools().GetMcpTools()) != 1 {
+		t.Fatalf("request lost conversation or tool context: %v", &decoded)
+	}
+}

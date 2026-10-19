@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"testing"
+
+	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/pb"
 )
 
 func TestNormalizedFamiliesKeepThinkingAndFastDimensions(t *testing.T) {
@@ -49,10 +51,10 @@ func TestModelInfosApplyDisplayNameMappingAfterNormalization(t *testing.T) {
 
 func TestResolveFixedModelIgnoresReasoningEffort(t *testing.T) {
 	service := New()
-	service.modelCache["account"] = cachedModels{models: []CursorModel{{ID: "composer-2.5"}}, expiresAt: service.now().Add(service.Config().ModelCacheTTL())}
+	service.modelCache["account"] = cachedModels{models: []CursorModel{{ID: "composer-2.5", Selection: &pb.RequestedModel{ModelId: "composer-2.5"}}}, expiresAt: service.now().Add(service.Config().ModelCacheTTL())}
 	got, err := service.resolveModel(context.Background(), AuthStorage{ID: "account"}, "composer-2.5", "high")
-	if err != nil || got != "composer-2.5" {
-		t.Fatalf("resolveModel() = %q, %v", got, err)
+	if err != nil || got.GetModelId() != "composer-2.5" {
+		t.Fatalf("resolveModel() = %v, %v", got, err)
 	}
 }
 

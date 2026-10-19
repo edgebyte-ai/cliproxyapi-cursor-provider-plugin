@@ -15,7 +15,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/pb"
 	"google.golang.org/protobuf/proto"
@@ -46,7 +45,7 @@ type TurnEvent struct {
 	Err        error
 }
 
-func (s *Service) runTurn(ctx context.Context, storage AuthStorage, model string, input TurnInput) (<-chan TurnEvent, error) {
+func (s *Service) runTurn(ctx context.Context, storage AuthStorage, model *pb.RequestedModel, input TurnInput) (<-chan TurnEvent, error) {
 	cfg := s.Config()
 	ctx, cancel := contextWithTimeout(ctx, cfg.RequestTimeout())
 	pipeReader, pipeWriter := io.Pipe()
@@ -95,16 +94,7 @@ func (s *Service) runTurn(ctx context.Context, storage AuthStorage, model string
 	} else {
 		action.Action = &pb.ConversationAction_ResumeAction{ResumeAction: &pb.ResumeAction{}}
 	}
-	runRequest := &pb.AgentRunRequest{
-		ConversationState: &pb.ConversationStateStructure{RootPromptMessagesJson: rootIDs},
-		Action:            action,
-		ModelDetails:      &pb.ModelDetails{ModelId: model, DisplayModelId: model, DisplayName: model},
-		RequestedModel:    &pb.RequestedModel{ModelId: model},
-		ConversationId:    &conversationID,
-	}
-	if len(input.Tools) > 0 {
-		runRequest.McpTools = &pb.McpTools{McpTools: input.Tools}
-	}
+	runRequest := newRunRequest(model, rootIDs, action, conversationID, input.Tools)
 
 	var writeMu sync.Mutex
 	send := func(message *pb.AgentClientMessage) error {
@@ -323,34 +313,17 @@ func mustUUID() string {
 	return id
 }
 
-func unaryProto(ctx context.Context, path string, body []byte, token string, cfg Config, timeout time.Duration) ([]byte, http.Header, error) {
-	headers := make(http.Header)
-	headers.Set("Content-Type", "application/proto")
-	headers.Set("Connect-Protocol-Version", "1")
-	headers.Set("Authorization", "Bearer "+token)
-	headers.Set("X-Ghost-Mode", "true")
-	headers.Set("X-Cursor-Client-Version", cfg.ClientVersion)
-	headers.Set("X-Cursor-Client-Type", "cli")
-	requestID, _ := randomUUID()
-	headers.Set("X-Request-Id", requestID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.CursorBaseURL, "/")+path, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, err
+func newRunRequest(model *pb.RequestedModel, rootIDs [][]byte, action *pb.ConversationAction, conversationID string, tools []*pb.McpToolDefinition) *pb.AgentRunRequest {
+	request := &pb.AgentRunRequest{
+		ConversationState: &pb.ConversationStateStructure{RootPromptMessagesJson: rootIDs},
+		Action:            action,
+		RequestedModel:    model,
+		ConversationId:    &conversationID,
 	}
-	req.Header = headers
-	resp, err := newH2Client(timeout).Do(req)
-	if err != nil {
-		return nil, nil, err
+	if len(tools) > 0 {
+		request.McpTools = &pb.McpTools{McpTools: tools}
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return nil, resp.Header, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, resp.Header, cursorStatusError(raw, resp.StatusCode)
-	}
-	return raw, resp.Header, nil
+	return request
 }
 
 func jsonBytes(value any) []byte {

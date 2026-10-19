@@ -41,7 +41,7 @@ func DefaultConfig() Config {
 		DefaultReasoningEffort: "high",
 		ModelDisplayNames:      map[string]string{},
 		CursorBaseURL:          "https://api2.cursor.sh",
-		ClientVersion:          "cli-2026.08.11-e8db854",
+		ClientVersion:          "cli-2026.10.16-e3cb207",
 		AllowedNativeTools:     []string{"mcp_tool_call", "get_mcp_tools_tool_call"},
 		RequestTimeoutSeconds:  300,
 		TransientRetryCount:    1,

@@ -33,6 +33,10 @@ func newH2Client(timeout time.Duration) *http.Client {
 }
 
 func doJSON(ctx context.Context, method, endpoint string, headers http.Header, body []byte, timeout time.Duration, target any) (int, http.Header, error) {
+	return doJSONWithClient(ctx, method, endpoint, headers, body, newH2Client(timeout), target)
+}
+
+func doJSONWithClient(ctx context.Context, method, endpoint string, headers http.Header, body []byte, client *http.Client, target any) (int, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, fmt.Errorf("build Cursor request: %w", err)
@@ -42,7 +46,7 @@ func doJSON(ctx context.Context, method, endpoint string, headers http.Header, b
 			req.Header.Add(key, value)
 		}
 	}
-	resp, err := newH2Client(timeout).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("send Cursor request: %w", err)
 	}
