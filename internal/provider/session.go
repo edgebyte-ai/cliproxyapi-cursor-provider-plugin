@@ -29,20 +29,23 @@ var errTurnFinished = errors.New("Cursor turn finished")
 var toolCallIDUnsafe = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 
 type TurnInput struct {
-	RootMessages [][]byte
-	UserText     string
-	Tools        []*pb.McpToolDefinition
+	RootMessages   [][]byte
+	UserText       string
+	Tools          []*pb.McpToolDefinition
+	ToolIdentities map[string]toolIdentity
 }
 
 type TurnEvent struct {
-	Type       string
-	Text       string
-	ToolCallID string
-	ToolName   string
-	ToolArgs   map[string]any
-	Tokens     int
-	DoneReason string
-	Err        error
+	Type          string
+	Text          string
+	ToolCallID    string
+	ToolName      string
+	ToolNamespace string
+	ToolCustom    bool
+	ToolArgs      map[string]any
+	Tokens        int
+	DoneReason    string
+	Err           error
 }
 
 func (s *Service) runTurn(ctx context.Context, storage AuthStorage, model *pb.RequestedModel, input TurnInput) (<-chan TurnEvent, error) {
@@ -164,7 +167,7 @@ func (s *Service) runTurn(ctx context.Context, storage AuthStorage, model *pb.Re
 			if err := proto.Unmarshal(payload, &message); err != nil {
 				continue
 			}
-			if handleErr := handleServerMessage(&message, blobs, input.Tools, send, events); handleErr != nil {
+			if handleErr := handleServerMessage(&message, blobs, input.Tools, input.ToolIdentities, send, events); handleErr != nil {
 				if errors.Is(handleErr, errTurnFinished) {
 					return
 				}
@@ -205,7 +208,7 @@ func gunzipPayload(payload []byte) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(reader, 64<<20))
 }
 
-func handleServerMessage(message *pb.AgentServerMessage, blobs map[string][]byte, tools []*pb.McpToolDefinition, send func(*pb.AgentClientMessage) error, events chan<- TurnEvent) error {
+func handleServerMessage(message *pb.AgentServerMessage, blobs map[string][]byte, tools []*pb.McpToolDefinition, identities map[string]toolIdentity, send func(*pb.AgentClientMessage) error, events chan<- TurnEvent) error {
 	if kv := message.GetKvServerMessage(); kv != nil {
 		if args := kv.GetGetBlobArgs(); args != nil {
 			data := blobs[fmt.Sprintf("%x", args.GetBlobId())]
@@ -241,11 +244,20 @@ func handleServerMessage(message *pb.AgentServerMessage, blobs map[string][]byte
 			return send(&pb.AgentClientMessage{Message: &pb.AgentClientMessage_ExecClientMessage{ExecClientMessage: client}})
 		}
 		if args := execMessage.GetMcpArgs(); args != nil {
+			identity, err := resolveToolIdentity(args, identities)
+			if err != nil {
+				return err
+			}
 			decoded := make(map[string]any, len(args.GetArgs()))
 			for key, value := range args.GetArgs() {
 				decoded[key] = decodeValue(value)
 			}
-			events <- TurnEvent{Type: "tool_call", ToolCallID: normalizeToolCallID(args.GetToolCallId()), ToolName: firstNonEmpty(args.GetToolName(), args.GetName(), "unknown"), ToolArgs: decoded}
+			if identity.Custom {
+				if _, ok := decoded["input"].(string); !ok {
+					return &StatusError{Code: "invalid_tool_input", Message: "Cursor returned a custom tool call without a string input", HTTPStatus: http.StatusBadGateway}
+				}
+			}
+			events <- TurnEvent{Type: "tool_call", ToolCallID: normalizeToolCallID(args.GetToolCallId()), ToolName: identity.Name, ToolNamespace: identity.Namespace, ToolCustom: identity.Custom, ToolArgs: decoded}
 			events <- TurnEvent{Type: "done", DoneReason: "tool_calls"}
 			return errTurnFinished
 		}

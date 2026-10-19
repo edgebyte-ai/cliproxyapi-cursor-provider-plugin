@@ -94,7 +94,7 @@ func TestNormalizeToolCallIDRemovesWhitespace(t *testing.T) {
 }
 
 func TestParseToolsSkipsUnnamedBuiltins(t *testing.T) {
-	tools, err := parseTools([]any{
+	tools, _, err := parseTools([]any{
 		map[string]any{"type": "web_search"},
 		map[string]any{"type": "function", "name": "shell", "parameters": map[string]any{"type": "object"}},
 	})

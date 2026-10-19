@@ -9,7 +9,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/edgebyte-ai/cliproxyapi-cursor-provider-plugin/internal/pb"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
@@ -70,7 +69,7 @@ func turnInput(format string, root map[string]any, cfg Config) (TurnInput, error
 			messages = append(messages, input...)
 		}
 	}
-	tools, err := parseTools(root["tools"])
+	tools, identities, err := parseTools(root["tools"])
 	if err != nil {
 		return TurnInput{}, err
 	}
@@ -117,13 +116,14 @@ func turnInput(format string, root map[string]any, cfg Config) (TurnInput, error
 		}
 		rootMessages = append(rootMessages, raw)
 	}
-	return TurnInput{RootMessages: rootMessages, UserText: userText, Tools: tools}, nil
+	return TurnInput{RootMessages: rootMessages, UserText: userText, Tools: tools, ToolIdentities: identities}, nil
 }
 
 func normalizeHistoryMessages(messages []any) []any {
 	const systemLeadIn = "Configuration for this session, set by the operator of this API gateway:"
 	const systemAck = "Understood. I will follow that configuration for the rest of this conversation."
 	out := make([]any, 0, len(messages)+2)
+	callNames := make(map[string]string)
 	for _, item := range messages {
 		message, ok := item.(map[string]any)
 		if !ok {
@@ -138,16 +138,22 @@ func normalizeHistoryMessages(messages []any) []any {
 				out = append(out, map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": text}}})
 			}
 			continue
-		case "function_call":
+		case "function_call", "custom_tool_call":
 			callID := firstNonEmpty(stringValue(message["call_id"]), stringValue(message["id"]), normalizeToolCallID(""))
+			name := historyToolName(message)
+			args := parseArgumentValue(message["arguments"])
+			if itemType == "custom_tool_call" {
+				args = map[string]any{"input": stringValue(message["input"])}
+			}
+			callNames[callID] = name
 			out = append(out, map[string]any{"role": "assistant", "content": []any{map[string]any{
-				"type": "tool-call", "toolCallId": callID, "toolName": stringValue(message["name"]), "args": parseArgumentValue(message["arguments"]),
+				"type": "tool-call", "toolCallId": callID, "toolName": name, "args": args,
 			}}})
 			continue
-		case "function_call_output":
+		case "function_call_output", "custom_tool_call_output":
 			callID := firstNonEmpty(stringValue(message["call_id"]), stringValue(message["id"]))
 			out = append(out, map[string]any{"role": "tool", "id": callID, "content": []any{map[string]any{
-				"type": "tool-result", "toolCallId": callID, "result": contentText(message["output"]),
+				"type": "tool-result", "toolCallId": callID, "toolName": callNames[callID], "result": contentText(message["output"]),
 			}}})
 			continue
 		}
@@ -261,42 +267,6 @@ func parseArgumentValue(value any) any {
 		return map[string]any{"_raw": text}
 	}
 	return parsed
-}
-
-func parseTools(value any) ([]*pb.McpToolDefinition, error) {
-	list, _ := value.([]any)
-	tools := make([]*pb.McpToolDefinition, 0, len(list))
-	for _, item := range list {
-		tool, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		definition := tool
-		if nested, ok := tool["function"].(map[string]any); ok {
-			definition = nested
-		}
-		name := firstNonEmpty(stringValue(definition["name"]), stringValue(tool["name"]))
-		if name == "" {
-			// Built-in Responses tools such as web_search may not have a caller-owned
-			// function name. Cursor can only surface MCP-style caller functions, so
-			// skip those capability declarations instead of rejecting the whole turn.
-			continue
-		}
-		schema := definition["parameters"]
-		if schema == nil {
-			schema = definition["input_schema"]
-		}
-		if schema == nil {
-			schema = map[string]any{"type": "object"}
-		}
-		schemaJSON, _ := json.Marshal(schema)
-		schemaText := string(schemaJSON)
-		tools = append(tools, &pb.McpToolDefinition{
-			Name: name, ToolName: name, ProviderIdentifier: "openai-caller",
-			Description: stringValue(definition["description"]), InputSchemaJson: &schemaText,
-		})
-	}
-	return tools, nil
 }
 
 func reasoningEffort(root map[string]any) string {

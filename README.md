@@ -8,6 +8,7 @@ Current target capabilities:
 - per-auth model discovery, priority, prefix, allowlist and denylist;
 - OpenAI Responses, Chat Completions and Anthropic Messages inputs;
 - caller-owned tool calls and real streaming through the plugin host callback;
+- Codex tool namespaces and custom tools, including raw-input `functions.exec` calls;
 - normalized `reasoning_effort` model families;
 - `resource_exhausted`, reset metadata and retry/cooldown propagation;
 - `cursor-native` and `other-models` quota groups through the Cursor Quota page and CPA's standard quota-provider API.

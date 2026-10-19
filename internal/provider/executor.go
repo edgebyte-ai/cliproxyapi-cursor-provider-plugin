@@ -23,9 +23,11 @@ type collectedTurn struct {
 }
 
 type toolCall struct {
-	ID   string
-	Name string
-	Args map[string]any
+	ID        string
+	Name      string
+	Namespace string
+	Custom    bool
+	Args      map[string]any
 }
 
 // PreparedStream holds a Cursor stream after the upstream has produced its
@@ -266,7 +268,7 @@ func collectTurn(events <-chan TurnEvent) (collectedTurn, error) {
 		case "thinking":
 			result.Thinking += event.Text
 		case "tool_call":
-			result.ToolCalls = append(result.ToolCalls, toolCall{ID: event.ToolCallID, Name: event.ToolName, Args: event.ToolArgs})
+			result.ToolCalls = append(result.ToolCalls, toolCallFromEvent(event))
 		case "usage":
 			result.Tokens = event.Tokens
 		case "done":
@@ -301,8 +303,7 @@ func nonStreamingPayload(format, model string, result collectedTurn, created int
 			outputs = append(outputs, map[string]any{"id": "msg_" + mustUUID(), "type": "message", "status": "completed", "role": "assistant", "content": content})
 		}
 		for _, call := range result.ToolCalls {
-			arguments, _ := json.Marshal(call.Args)
-			outputs = append(outputs, map[string]any{"id": call.ID, "call_id": call.ID, "type": "function_call", "name": call.Name, "arguments": string(arguments), "status": "completed"})
+			outputs = append(outputs, responseToolItem(call))
 		}
 		return json.Marshal(map[string]any{
 			"id": "resp_" + mustUUID(), "object": "response", "created_at": created, "status": "completed", "model": model,
@@ -402,19 +403,26 @@ func (s *streamState) openAIResponseFrames(event TurnEvent) ([][]byte, error) {
 		// instead of emitting orphan summary deltas.
 		s.reasoning += event.Text
 	case "tool_call":
-		s.toolCalls = append(s.toolCalls, toolCall{ID: event.ToolCallID, Name: event.ToolName, Args: event.ToolArgs})
-		arguments, _ := json.Marshal(event.ToolArgs)
-		item := map[string]any{"id": event.ToolCallID, "call_id": event.ToolCallID, "type": "function_call", "name": event.ToolName, "arguments": string(arguments), "status": "completed"}
+		call := toolCallFromEvent(event)
+		s.toolCalls = append(s.toolCalls, call)
+		item := responseToolItem(call)
+		field, eventPrefix := "arguments", "response.function_call_arguments"
+		if call.Custom {
+			field, eventPrefix = "input", "response.custom_tool_call_input"
+		}
+		added := responseToolItem(call)
+		added["status"], added[field] = "in_progress", ""
 		frames = append(frames,
-			s.responseEvent("response.output_item.added", map[string]any{"output_index": len(s.toolCalls), "item": item}),
+			s.responseEvent("response.output_item.added", map[string]any{"output_index": len(s.toolCalls), "item": added}),
+			s.responseEvent(eventPrefix+".delta", map[string]any{"item_id": call.ID, "output_index": len(s.toolCalls), "delta": item[field]}),
+			s.responseEvent(eventPrefix+".done", map[string]any{"item_id": call.ID, "output_index": len(s.toolCalls), field: item[field]}),
 			s.responseEvent("response.output_item.done", map[string]any{"output_index": len(s.toolCalls), "item": item}),
 		)
 	case "done":
 		message := map[string]any{"id": s.messageID, "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": s.text, "annotations": []any{}}}}
 		outputs := []any{message}
 		for _, call := range s.toolCalls {
-			arguments, _ := json.Marshal(call.Args)
-			outputs = append(outputs, map[string]any{"id": call.ID, "call_id": call.ID, "type": "function_call", "name": call.Name, "arguments": string(arguments), "status": "completed"})
+			outputs = append(outputs, responseToolItem(call))
 		}
 		frames = append(frames,
 			s.responseEvent("response.output_text.done", map[string]any{"item_id": s.messageID, "output_index": 0, "content_index": 0, "text": s.text, "logprobs": []any{}}),

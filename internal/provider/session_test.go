@@ -15,7 +15,7 @@ func TestMCPDiscoveryReturnsCallerCatalog(t *testing.T) {
 			Message: &pb.ExecServerMessage_McpStateExecArgs{McpStateExecArgs: &pb.McpStateExecArgs{ServerIdentifiers: []string{"openai-caller"}}},
 		}}}
 		var response *pb.AgentClientMessage
-		err := handleServerMessage(message, nil, tools, func(m *pb.AgentClientMessage) error { response = m; return nil }, make(chan TurnEvent, 2))
+		err := handleServerMessage(message, nil, tools, nil, func(m *pb.AgentClientMessage) error { response = m; return nil }, make(chan TurnEvent, 2))
 		if err != nil || response == nil {
 			t.Fatalf("discovery failed: response=%v err=%v", response, err)
 		}
@@ -45,7 +45,7 @@ func TestMCPCallPreservesCallerNameAfterDiscovery(t *testing.T) {
 		Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{Name: "openai-caller-get_weather", ToolName: "get_weather", ToolCallId: "weather-call"}},
 	}}}
 	events := make(chan TurnEvent, 2)
-	err := handleServerMessage(message, nil, nil, nil, events)
+	err := handleServerMessage(message, nil, nil, map[string]toolIdentity{"get_weather": {Name: "get_weather"}}, nil, events)
 	if !errors.Is(err, errTurnFinished) {
 		t.Fatalf("error = %v", err)
 	}
