@@ -141,7 +141,7 @@ func isTransientCursorError(ctx context.Context, err error) bool {
 	}
 	var statusErr *StatusError
 	if errors.As(err, &statusErr) {
-		return isTransientHTTPStatus(statusErr.HTTPStatus)
+		return statusErr.Retryable && isTransientHTTPStatus(statusErr.HTTPStatus)
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true

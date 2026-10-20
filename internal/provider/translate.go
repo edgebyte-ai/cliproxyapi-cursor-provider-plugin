@@ -179,8 +179,10 @@ func normalizeHistoryMessages(messages []any) []any {
 				for _, rawCall := range calls {
 					call, _ := rawCall.(map[string]any)
 					function, _ := call["function"].(map[string]any)
+					callID, name := stringValue(call["id"]), stringValue(function["name"])
+					callNames[callID] = name
 					parts = append(parts, map[string]any{
-						"type": "tool-call", "toolCallId": stringValue(call["id"]), "toolName": stringValue(function["name"]), "args": parseArgumentValue(function["arguments"]),
+						"type": "tool-call", "toolCallId": callID, "toolName": name, "args": parseArgumentValue(function["arguments"]),
 					})
 				}
 			}
@@ -190,11 +192,33 @@ func normalizeHistoryMessages(messages []any) []any {
 		case "tool":
 			callID := firstNonEmpty(stringValue(message["tool_call_id"]), stringValue(message["id"]))
 			out = append(out, map[string]any{"role": "tool", "id": callID, "content": []any{map[string]any{
-				"type": "tool-result", "toolName": stringValue(message["name"]), "toolCallId": callID, "result": contentText(message["content"]),
+				"type": "tool-result", "toolName": firstNonEmpty(stringValue(message["name"]), callNames[callID]), "toolCallId": callID, "result": contentText(message["content"]),
 			}}})
 		}
 	}
-	return out
+	return mergeHistoryMessages(out)
+}
+
+// Cursor forwards each history record as a model message. Keep a tool call and
+// any following assistant commentary in one message so its results immediately
+// follow it. Parallel tool results likewise belong in one response message.
+func mergeHistoryMessages(messages []any) []any {
+	merged := make([]any, 0, len(messages))
+	for _, item := range messages {
+		message := item.(map[string]any)
+		role := stringValue(message["role"])
+		if len(merged) > 0 && (role == "assistant" || role == "tool") {
+			previous := merged[len(merged)-1].(map[string]any)
+			if stringValue(previous["role"]) == role {
+				previous["content"] = append(previous["content"].([]any), message["content"].([]any)...)
+				// Each result carries its own toolCallId; a combined message has no single ID.
+				delete(previous, "id")
+				continue
+			}
+		}
+		merged = append(merged, message)
+	}
+	return merged
 }
 
 // agentMessageText decodes Codex native-subagent messages. Codex currently

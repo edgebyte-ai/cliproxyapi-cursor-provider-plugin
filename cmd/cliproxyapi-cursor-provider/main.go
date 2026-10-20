@@ -43,6 +43,7 @@ import "C"
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unsafe"
@@ -84,17 +85,7 @@ func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t,
 	}
 	result, err := dispatch(C.GoString(method), requestBytes)
 	if err != nil {
-		status := 0
-		code := "plugin_error"
-		retryable := false
-		retryAfter := int64(0)
-		if typed, ok := err.(*provider.StatusError); ok {
-			status = typed.HTTPStatus
-			code = typed.Code
-			retryable = typed.Retryable
-			retryAfter = providerRetryAfterSeconds(typed)
-		}
-		writeResponse(response, errorEnvelope(code, err.Error(), status, retryable, retryAfter))
+		writeResponse(response, providerErrorEnvelope(err))
 		return 1
 	}
 	raw, marshalErr := okEnvelope(result)
@@ -186,6 +177,21 @@ func errorEnvelope(code, message string, status int, retryable bool, retryAfter 
 	}
 	raw, _ := json.Marshal(pluginabi.Envelope{OK: false, Error: &pluginabi.Error{Code: code, Message: message, HTTPStatus: status, Retryable: retryable}})
 	return raw
+}
+
+func providerErrorEnvelope(err error) []byte {
+	status := 0
+	code := "plugin_error"
+	retryable := false
+	retryAfter := int64(0)
+	var typed *provider.StatusError
+	if errors.As(err, &typed) {
+		status = typed.HTTPStatus
+		code = typed.Code
+		retryable = typed.Retryable
+		retryAfter = providerRetryAfterSeconds(typed)
+	}
+	return errorEnvelope(code, err.Error(), status, retryable, retryAfter)
 }
 
 func providerRetryAfterSeconds(err *provider.StatusError) int64 {

@@ -29,6 +29,83 @@ func TestNormalizeHistoryBuildsToolCallResultPair(t *testing.T) {
 	}
 }
 
+func TestResponsesHistoryKeepsToolCallAndCommentaryTogether(t *testing.T) {
+	raw := []byte(`{"model":"claude-opus-5-5","input":[
+		{"role":"user","content":"Check the weather."},
+		{"type":"function_call","call_id":"call-1","name":"get_weather","arguments":"{\"city\":\"Tokyo\"}"},
+		{"role":"assistant","content":[{"type":"output_text","text":"Checking the forecast."}]},
+		{"type":"function_call_output","call_id":"call-1","output":"Sunny"}
+	]}`)
+	parsed, err := parseExecutorRequest(pluginapi.ExecutorRequest{
+		SourceFormat: "responses", Format: "responses", OriginalRequest: raw,
+	}, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Input.RootMessages) != 3 {
+		t.Fatalf("history has %d messages, want user, assistant, tool", len(parsed.Input.RootMessages))
+	}
+	var assistant, result map[string]any
+	if err := json.Unmarshal(parsed.Input.RootMessages[1], &assistant); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(parsed.Input.RootMessages[2], &result); err != nil {
+		t.Fatal(err)
+	}
+	parts := assistant["content"].([]any)
+	if assistant["role"] != "assistant" || len(parts) != 2 {
+		t.Fatalf("tool call and commentary were not combined: %#v", assistant)
+	}
+	call, commentary := parts[0].(map[string]any), parts[1].(map[string]any)
+	if call["type"] != "tool-call" || call["toolCallId"] != "call-1" || call["args"].(map[string]any)["city"] != "Tokyo" {
+		t.Fatalf("tool call changed: %#v", call)
+	}
+	if commentary["type"] != "text" || commentary["text"] != "Checking the forecast." {
+		t.Fatalf("commentary order or content changed: %#v", commentary)
+	}
+	resultPart := result["content"].([]any)[0].(map[string]any)
+	if result["role"] != "tool" || resultPart["toolCallId"] != "call-1" || resultPart["toolName"] != "get_weather" || resultPart["result"] != "Sunny" {
+		t.Fatalf("tool result changed: %#v", result)
+	}
+}
+
+func TestChatHistoryGroupsParallelToolResults(t *testing.T) {
+	messages := []any{
+		map[string]any{"role": "user", "content": "Check both cities."},
+		map[string]any{"role": "assistant", "tool_calls": []any{
+			map[string]any{"id": "call-1", "function": map[string]any{"name": "first_weather", "arguments": `{}`}},
+			map[string]any{"id": "call-2", "function": map[string]any{"name": "second_weather", "arguments": `{}`}},
+		}},
+		map[string]any{"role": "tool", "tool_call_id": "call-1", "content": "Sunny"},
+		map[string]any{"role": "tool", "tool_call_id": "call-2", "content": "Cloudy"},
+		map[string]any{"role": "assistant", "content": "Both forecasts are ready."},
+		map[string]any{"role": "user", "content": "Thanks."},
+		map[string]any{"role": "assistant", "content": "You're welcome."},
+	}
+	normalized := normalizeHistoryMessages(messages)
+	if len(normalized) != 6 {
+		t.Fatalf("history has %d messages, want 6 with grouped results", len(normalized))
+	}
+	for i, role := range []string{"user", "assistant", "tool", "assistant", "user", "assistant"} {
+		if normalized[i].(map[string]any)["role"] != role {
+			t.Fatalf("message %d crossed a conversation boundary: %#v", i, normalized[i])
+		}
+	}
+	results := normalized[2].(map[string]any)["content"].([]any)
+	if len(results) != 2 {
+		t.Fatalf("parallel results were not combined: %#v", results)
+	}
+	for i, want := range []struct{ id, name, result string }{
+		{"call-1", "first_weather", "Sunny"},
+		{"call-2", "second_weather", "Cloudy"},
+	} {
+		part := results[i].(map[string]any)
+		if part["type"] != "tool-result" || part["toolCallId"] != want.id || part["toolName"] != want.name || part["result"] != want.result {
+			t.Fatalf("parallel result %d changed: %#v", i, part)
+		}
+	}
+}
+
 func TestParseResponsesUsesCodexAgentMessageAsActiveTask(t *testing.T) {
 	raw, err := json.Marshal(map[string]any{
 		"model":  "grok-4.6",
