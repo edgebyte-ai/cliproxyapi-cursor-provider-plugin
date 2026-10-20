@@ -165,7 +165,8 @@ func TestLiveCursorCodexTools(t *testing.T) {
 		wantType, wantName = "custom_tool_call", "exec"
 	}
 	input := []any{map[string]any{"role": "user", "content": prompt}}
-	body := map[string]any{"model": "grok-4.7", "reasoning": map[string]string{"effort": "high"}, "input": input, "tools": []any{map[string]any{"type": "namespace", "name": "functions", "tools": []any{tool}}}}
+	model := firstNonEmpty(os.Getenv("CURSOR_PLUGIN_LIVE_MODEL"), "grok-4.7")
+	body := map[string]any{"model": model, "reasoning": map[string]string{"effort": "high"}, "input": input, "tools": []any{map[string]any{"type": "namespace", "name": "functions", "tools": []any{tool}}}}
 	service := New()
 	execute := func() map[string]any {
 		t.Helper()
@@ -173,7 +174,7 @@ func TestLiveCursorCodexTools(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		response, err := service.Execute(context.Background(), pluginapi.ExecutorRequest{AuthID: "live-codex-tool", AuthProvider: ProviderID, Model: "grok-4.7", Format: "responses", SourceFormat: "responses", OriginalRequest: raw, Payload: raw, StorageJSON: storage})
+		response, err := service.Execute(context.Background(), pluginapi.ExecutorRequest{AuthID: "live-codex-tool", AuthProvider: ProviderID, Model: model, Format: "responses", SourceFormat: "responses", OriginalRequest: raw, Payload: raw, StorageJSON: storage})
 		if err != nil {
 			t.Fatal(err)
 		}

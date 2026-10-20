@@ -129,3 +129,27 @@ func toolCallFromEvent(event TurnEvent) toolCall {
 func historyToolName(message map[string]any) string {
 	return callerToolName(strings.TrimSpace(stringValue(message["namespace"])), stringValue(message["name"]))
 }
+
+// Cursor exposes MCP functions to models through CallDynamicTool. Replay that
+// same wrapper so models recognize earlier calls and consume their results.
+func cursorToolHistory(messages []any) []any {
+	for _, item := range messages {
+		message := item.(map[string]any)
+		parts, _ := message["content"].([]any)
+		for _, item := range parts {
+			part := item.(map[string]any)
+			switch part["type"] {
+			case "tool-call":
+				part["args"] = map[string]any{
+					"namespace": "openai-caller",
+					"toolName":  part["toolName"],
+					"arguments": part["args"],
+				}
+				part["toolName"] = "CallDynamicTool"
+			case "tool-result":
+				part["toolName"] = "CallDynamicTool"
+			}
+		}
+	}
+	return messages
+}

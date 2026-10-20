@@ -190,4 +190,25 @@ func TestResponsesToolHistoryKeepsNamespaceAndRawInput(t *testing.T) {
 			t.Fatalf("custom history input changed: %v", part)
 		}
 	}
+	got = cursorToolHistory(got)
+	for i, name := range []string{"functions__read_file", "", "functions__exec", ""} {
+		part := got[i].(map[string]any)["content"].([]any)[0].(map[string]any)
+		if part["toolName"] != "CallDynamicTool" {
+			t.Fatalf("history item %d omitted Cursor's native tool wrapper: %v", i, part)
+		}
+		if name == "" {
+			if part["result"] != messages[i].(map[string]any)["output"] {
+				t.Fatalf("tool result changed: %v", part)
+			}
+			continue
+		}
+		args := part["args"].(map[string]any)
+		if args["namespace"] != "openai-caller" || args["toolName"] != name {
+			t.Fatalf("history item %d lost its MCP destination: %v", i, part)
+		}
+		arguments := args["arguments"].(map[string]any)
+		if (i == 0 && arguments["path"] != "global.json") || (i == 2 && arguments["input"] != `text("probe")`) {
+			t.Fatalf("history arguments changed: %v", part)
+		}
+	}
 }

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -26,7 +25,6 @@ const (
 )
 
 var errTurnFinished = errors.New("Cursor turn finished")
-var toolCallIDUnsafe = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 
 type TurnInput struct {
 	RootMessages   [][]byte
@@ -274,17 +272,6 @@ func handleServerMessage(message *pb.AgentServerMessage, blobs map[string][]byte
 		}
 	}
 	return nil
-}
-
-func normalizeToolCallID(value string) string {
-	value = strings.Trim(toolCallIDUnsafe.ReplaceAllString(strings.TrimSpace(value), "_"), "_")
-	if value == "" {
-		return "call_" + mustUUID()
-	}
-	if len(value) > 128 {
-		value = value[:128]
-	}
-	return value
 }
 
 func decodeValue(raw []byte) any {

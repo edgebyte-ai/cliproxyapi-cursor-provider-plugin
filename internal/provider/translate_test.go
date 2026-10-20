@@ -57,14 +57,15 @@ func TestResponsesHistoryKeepsToolCallAndCommentaryTogether(t *testing.T) {
 		t.Fatalf("tool call and commentary were not combined: %#v", assistant)
 	}
 	call, commentary := parts[0].(map[string]any), parts[1].(map[string]any)
-	if call["type"] != "tool-call" || call["toolCallId"] != "call-1" || call["args"].(map[string]any)["city"] != "Tokyo" {
+	args := call["args"].(map[string]any)
+	if call["type"] != "tool-call" || call["toolCallId"] != "call-1" || call["toolName"] != "CallDynamicTool" || args["namespace"] != "openai-caller" || args["toolName"] != "get_weather" || args["arguments"].(map[string]any)["city"] != "Tokyo" {
 		t.Fatalf("tool call changed: %#v", call)
 	}
 	if commentary["type"] != "text" || commentary["text"] != "Checking the forecast." {
 		t.Fatalf("commentary order or content changed: %#v", commentary)
 	}
 	resultPart := result["content"].([]any)[0].(map[string]any)
-	if result["role"] != "tool" || resultPart["toolCallId"] != "call-1" || resultPart["toolName"] != "get_weather" || resultPart["result"] != "Sunny" {
+	if result["role"] != "tool" || resultPart["toolCallId"] != "call-1" || resultPart["toolName"] != "CallDynamicTool" || resultPart["result"] != "Sunny" {
 		t.Fatalf("tool result changed: %#v", result)
 	}
 }
@@ -160,13 +161,6 @@ func TestAgentMessageTextAcceptsPlainChineseTask(t *testing.T) {
 	}})
 	if opaque || text != "立即审查第七个问题并返回评分。" {
 		t.Fatalf("agentMessageText() = %q, %t", text, opaque)
-	}
-}
-
-func TestNormalizeToolCallIDRemovesWhitespace(t *testing.T) {
-	got := normalizeToolCallID("call-1\nfc_2")
-	if got != "call-1_fc_2" {
-		t.Fatalf("normalized id = %q", got)
 	}
 }
 

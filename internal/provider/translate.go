@@ -104,7 +104,7 @@ func turnInput(format string, root map[string]any, cfg Config) (TurnInput, error
 	} else {
 		userText = cfg.ContinuationPrompt
 	}
-	historyMessages := normalizeHistoryMessages(messages)
+	historyMessages := cursorToolHistory(normalizeHistoryMessages(messages))
 	rootMessages := make([][]byte, 0, len(historyMessages))
 	for _, message := range historyMessages {
 		raw, marshalErr := json.Marshal(message)
@@ -139,7 +139,7 @@ func normalizeHistoryMessages(messages []any) []any {
 			}
 			continue
 		case "function_call", "custom_tool_call":
-			callID := firstNonEmpty(stringValue(message["call_id"]), stringValue(message["id"]), normalizeToolCallID(""))
+			callID := restoreToolCallID(firstNonEmpty(stringValue(message["call_id"]), stringValue(message["id"]), normalizeToolCallID("")))
 			name := historyToolName(message)
 			args := parseArgumentValue(message["arguments"])
 			if itemType == "custom_tool_call" {
@@ -151,7 +151,7 @@ func normalizeHistoryMessages(messages []any) []any {
 			}}})
 			continue
 		case "function_call_output", "custom_tool_call_output":
-			callID := firstNonEmpty(stringValue(message["call_id"]), stringValue(message["id"]))
+			callID := restoreToolCallID(firstNonEmpty(stringValue(message["call_id"]), stringValue(message["id"])))
 			out = append(out, map[string]any{"role": "tool", "id": callID, "content": []any{map[string]any{
 				"type": "tool-result", "toolCallId": callID, "toolName": callNames[callID], "result": contentText(message["output"]),
 			}}})
@@ -179,7 +179,7 @@ func normalizeHistoryMessages(messages []any) []any {
 				for _, rawCall := range calls {
 					call, _ := rawCall.(map[string]any)
 					function, _ := call["function"].(map[string]any)
-					callID, name := stringValue(call["id"]), stringValue(function["name"])
+					callID, name := restoreToolCallID(stringValue(call["id"])), stringValue(function["name"])
 					callNames[callID] = name
 					parts = append(parts, map[string]any{
 						"type": "tool-call", "toolCallId": callID, "toolName": name, "args": parseArgumentValue(function["arguments"]),
@@ -190,7 +190,7 @@ func normalizeHistoryMessages(messages []any) []any {
 				out = append(out, map[string]any{"role": "assistant", "content": parts})
 			}
 		case "tool":
-			callID := firstNonEmpty(stringValue(message["tool_call_id"]), stringValue(message["id"]))
+			callID := restoreToolCallID(firstNonEmpty(stringValue(message["tool_call_id"]), stringValue(message["id"])))
 			out = append(out, map[string]any{"role": "tool", "id": callID, "content": []any{map[string]any{
 				"type": "tool-result", "toolName": firstNonEmpty(stringValue(message["name"]), callNames[callID]), "toolCallId": callID, "result": contentText(message["content"]),
 			}}})
