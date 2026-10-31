@@ -196,7 +196,7 @@ func (p *PreparedStream) Headers() http.Header {
 	return p.headers.Clone()
 }
 
-// Pump converts all buffered and subsequent Cursor events to downstream SSE.
+// Pump converts buffered and subsequent Cursor events to downstream protocol chunks.
 func (p *PreparedStream) Pump(emit func([]byte) error) error {
 	if p == nil || p.state == nil {
 		return &StatusError{Code: "cursor_stream_unprepared", Message: "Cursor stream was not prepared", HTTPStatus: http.StatusInternalServerError}
@@ -370,21 +370,21 @@ func (s *streamState) openAIChatFrames(event TurnEvent) ([][]byte, error) {
 	frames := make([][]byte, 0, 2)
 	if !s.opened {
 		s.opened = true
-		frames = append(frames, sseData(map[string]any{"id": "chatcmpl-" + s.id, "object": "chat.completion.chunk", "created": s.created, "model": s.model, "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant"}, "finish_reason": nil}}}))
+		frames = append(frames, jsonData(map[string]any{"id": "chatcmpl-" + s.id, "object": "chat.completion.chunk", "created": s.created, "model": s.model, "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant"}, "finish_reason": nil}}}))
 	}
 	switch event.Type {
 	case "text":
-		frames = append(frames, sseData(chatChunk(s, map[string]any{"content": event.Text}, nil)))
+		frames = append(frames, jsonData(chatChunk(s, map[string]any{"content": event.Text}, nil)))
 	case "thinking":
-		frames = append(frames, sseData(chatChunk(s, map[string]any{"reasoning_content": event.Text}, nil)))
+		frames = append(frames, jsonData(chatChunk(s, map[string]any{"reasoning_content": event.Text}, nil)))
 	case "tool_call":
 		arguments, _ := json.Marshal(event.ToolArgs)
-		frames = append(frames, sseData(chatChunk(s, map[string]any{"tool_calls": []any{map[string]any{"index": s.toolIdx, "id": event.ToolCallID, "type": "function", "function": map[string]any{"name": event.ToolName, "arguments": string(arguments)}}}}, nil)))
+		frames = append(frames, jsonData(chatChunk(s, map[string]any{"tool_calls": []any{map[string]any{"index": s.toolIdx, "id": event.ToolCallID, "type": "function", "function": map[string]any{"name": event.ToolName, "arguments": string(arguments)}}}}, nil)))
 		s.toolIdx++
 	case "done":
 		chunk := chatChunk(s, map[string]any{}, map[bool]string{true: "tool_calls", false: "stop"}[event.DoneReason == "tool_calls"])
 		chunk["usage"] = usageBlock(s.usage)
-		frames = append(frames, sseData(chunk), []byte("data: [DONE]\n\n"))
+		frames = append(frames, jsonData(chunk))
 	}
 	return frames, nil
 }
@@ -472,9 +472,10 @@ func chatChunk(state *streamState, delta map[string]any, finish any) map[string]
 	return map[string]any{"id": "chatcmpl-" + state.id, "object": "chat.completion.chunk", "created": state.created, "model": state.model, "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}}
 }
 
-func sseData(payload any) []byte {
+// CLIProxyAPI adds the SSE data prefix and final DONE marker for Chat Completions.
+func jsonData(payload any) []byte {
 	raw, _ := json.Marshal(payload)
-	return []byte("data: " + string(raw) + "\n\n")
+	return raw
 }
 
 func sseEvent(name string, payload any) []byte {

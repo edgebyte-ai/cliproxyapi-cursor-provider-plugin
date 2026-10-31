@@ -105,7 +105,16 @@ func TestExecutorUsageFromCursorWire(t *testing.T) {
 						t.Fatal(err)
 					}
 					var stream strings.Builder
-					if err := prepared.Pump(func(frame []byte) error { _, err := stream.Write(frame); return err }); err != nil {
+					if err := prepared.Pump(func(frame []byte) error {
+						if format == "openai-chat" {
+							if !json.Valid(frame) {
+								t.Fatalf("Chat executor chunk must be raw JSON for the host SSE wrapper: %q", frame)
+							}
+							frame = append(append([]byte("data: "), frame...), '\n', '\n')
+						}
+						_, err := stream.Write(frame)
+						return err
+					}); err != nil {
 						t.Fatal(err)
 					}
 					usages := terminalStreamUsages(t, format, stream.String())
