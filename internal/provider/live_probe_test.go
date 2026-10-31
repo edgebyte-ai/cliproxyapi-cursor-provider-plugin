@@ -36,7 +36,7 @@ func TestLiveCursorTurn(t *testing.T) {
 	}
 	seen := false
 	for event := range events {
-		t.Logf("event type=%s text=%q reason=%s err=%v tokens=%d", event.Type, event.Text, event.DoneReason, event.Err, event.Tokens)
+		t.Logf("event type=%s text=%q reason=%s err=%v tokens=%d usage=%+v", event.Type, event.Text, event.DoneReason, event.Err, event.Tokens, event.Usage)
 		seen = true
 	}
 	if !seen {
@@ -70,6 +70,7 @@ func TestLiveCursorExecutor(t *testing.T) {
 		t.Fatal(err)
 	}
 	var result struct {
+		Usage   map[string]any `json:"usage"`
 		Choices []struct {
 			FinishReason string `json:"finish_reason"`
 			Message      struct {
@@ -83,7 +84,14 @@ func TestLiveCursorExecutor(t *testing.T) {
 	if len(result.Choices) != 1 || result.Choices[0].FinishReason != "stop" || !strings.Contains(result.Choices[0].Message.Content, "4") {
 		t.Fatalf("unexpected final answer: %+v", result)
 	}
+	if input, _ := result.Usage["prompt_tokens"].(float64); input <= 0 {
+		t.Fatalf("missing input usage: %v", result.Usage)
+	}
+	if output, _ := result.Usage["completion_tokens"].(float64); output <= 0 {
+		t.Fatalf("missing output usage: %v", result.Usage)
+	}
 	t.Logf("model=%s answer=%q", model, result.Choices[0].Message.Content)
+	t.Logf("usage=%v", result.Usage)
 }
 
 func TestLiveCursorToolCall(t *testing.T) {
@@ -144,6 +152,13 @@ func TestLiveCursorToolCall(t *testing.T) {
 		t.Fatalf("unexpected tool call: %+v, %v", call, args)
 	}
 	t.Logf("tool=%s arguments=%s", call.Function.Name, call.Function.Arguments)
+	var usage struct {
+		Usage map[string]any `json:"usage"`
+	}
+	if err := json.Unmarshal(response.Payload, &usage); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("usage=%v", usage.Usage)
 }
 
 func TestLiveCursorCodexTools(t *testing.T) {

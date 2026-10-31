@@ -18,7 +18,7 @@ type collectedTurn struct {
 	Text       string
 	Thinking   string
 	ToolCalls  []toolCall
-	Tokens     int
+	Usage      tokenUsage
 	DoneReason string
 }
 
@@ -270,7 +270,7 @@ func collectTurn(events <-chan TurnEvent) (collectedTurn, error) {
 		case "tool_call":
 			result.ToolCalls = append(result.ToolCalls, toolCallFromEvent(event))
 		case "usage":
-			result.Tokens = event.Tokens
+			result.Usage.observe(event)
 		case "done":
 			if event.Err != nil {
 				return collectedTurn{}, event.Err
@@ -294,7 +294,7 @@ func nonStreamingPayload(format, model string, result collectedTurn, created int
 		return json.Marshal(map[string]any{
 			"id": "chatcmpl-" + mustUUID(), "object": "chat.completion", "created": created, "model": model,
 			"choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finishReason(result)}},
-			"usage":   usageBlock(result.Tokens),
+			"usage":   usageBlock(result.Usage),
 		})
 	case "openai-response":
 		outputs := make([]any, 0, 1+len(result.ToolCalls))
@@ -307,7 +307,7 @@ func nonStreamingPayload(format, model string, result collectedTurn, created int
 		}
 		return json.Marshal(map[string]any{
 			"id": "resp_" + mustUUID(), "object": "response", "created_at": created, "status": "completed", "model": model,
-			"output": outputs, "usage": responseUsageBlock(result.Tokens),
+			"output": outputs, "usage": responseUsageBlock(result.Usage),
 		})
 	case "claude":
 		content := make([]any, 0, 2+len(result.ToolCalls))
@@ -323,7 +323,7 @@ func nonStreamingPayload(format, model string, result collectedTurn, created int
 		return json.Marshal(map[string]any{
 			"id": "msg_" + mustUUID(), "type": "message", "role": "assistant", "model": model,
 			"content": content, "stop_reason": map[bool]string{true: "tool_use", false: "end_turn"}[len(result.ToolCalls) > 0],
-			"usage": map[string]any{"input_tokens": 0, "output_tokens": result.Tokens},
+			"usage": claudeUsageBlock(result.Usage),
 		})
 	default:
 		return nil, fmt.Errorf("unsupported response format %q", format)
@@ -342,6 +342,7 @@ type streamState struct {
 	reasoning string
 	messageID string
 	toolCalls []toolCall
+	usage     tokenUsage
 }
 
 func newStreamState(format, model string, created int64) *streamState {
@@ -349,6 +350,10 @@ func newStreamState(format, model string, created int64) *streamState {
 }
 
 func (s *streamState) frames(event TurnEvent) ([][]byte, error) {
+	if event.Type == "usage" {
+		s.usage.observe(event)
+		return nil, nil
+	}
 	switch s.format {
 	case "openai-chat":
 		return s.openAIChatFrames(event)
@@ -377,7 +382,9 @@ func (s *streamState) openAIChatFrames(event TurnEvent) ([][]byte, error) {
 		frames = append(frames, sseData(chatChunk(s, map[string]any{"tool_calls": []any{map[string]any{"index": s.toolIdx, "id": event.ToolCallID, "type": "function", "function": map[string]any{"name": event.ToolName, "arguments": string(arguments)}}}}, nil)))
 		s.toolIdx++
 	case "done":
-		frames = append(frames, sseData(chatChunk(s, map[string]any{}, map[bool]string{true: "tool_calls", false: "stop"}[event.DoneReason == "tool_calls"])), []byte("data: [DONE]\n\n"))
+		chunk := chatChunk(s, map[string]any{}, map[bool]string{true: "tool_calls", false: "stop"}[event.DoneReason == "tool_calls"])
+		chunk["usage"] = usageBlock(s.usage)
+		frames = append(frames, sseData(chunk), []byte("data: [DONE]\n\n"))
 	}
 	return frames, nil
 }
@@ -428,7 +435,7 @@ func (s *streamState) openAIResponseFrames(event TurnEvent) ([][]byte, error) {
 			s.responseEvent("response.output_text.done", map[string]any{"item_id": s.messageID, "output_index": 0, "content_index": 0, "text": s.text, "logprobs": []any{}}),
 			s.responseEvent("response.content_part.done", map[string]any{"item_id": s.messageID, "output_index": 0, "content_index": 0, "part": map[string]any{"type": "output_text", "text": s.text, "annotations": []any{}}}),
 			s.responseEvent("response.output_item.done", map[string]any{"output_index": 0, "item": message}),
-			s.responseEvent("response.completed", map[string]any{"response": map[string]any{"id": responseID, "object": "response", "created_at": s.created, "status": "completed", "model": s.model, "output": outputs, "usage": responseUsageBlock(event.Tokens)}}),
+			s.responseEvent("response.completed", map[string]any{"response": map[string]any{"id": responseID, "object": "response", "created_at": s.created, "status": "completed", "model": s.model, "output": outputs, "usage": responseUsageBlock(s.usage)}}),
 		)
 	}
 	return frames, nil
@@ -456,7 +463,7 @@ func (s *streamState) claudeFrames(event TurnEvent) ([][]byte, error) {
 		frames = append(frames, sseEvent("content_block_start", map[string]any{"type": "content_block_start", "index": s.toolIdx + 1, "content_block": map[string]any{"type": "tool_use", "id": event.ToolCallID, "name": event.ToolName, "input": event.ToolArgs}}))
 		s.toolIdx++
 	case "done":
-		frames = append(frames, sseEvent("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": map[bool]string{true: "tool_use", false: "end_turn"}[event.DoneReason == "tool_calls"]}, "usage": map[string]any{"output_tokens": event.Tokens}}), sseEvent("message_stop", map[string]any{"type": "message_stop"}))
+		frames = append(frames, sseEvent("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": map[bool]string{true: "tool_use", false: "end_turn"}[event.DoneReason == "tool_calls"]}, "usage": claudeUsageBlock(s.usage)}), sseEvent("message_stop", map[string]any{"type": "message_stop"}))
 	}
 	return frames, nil
 }
@@ -496,14 +503,6 @@ func nullableText(text string) any {
 		return nil
 	}
 	return text
-}
-
-func usageBlock(tokens int) map[string]any {
-	return map[string]any{"prompt_tokens": 0, "completion_tokens": tokens, "total_tokens": tokens}
-}
-
-func responseUsageBlock(tokens int) map[string]any {
-	return map[string]any{"input_tokens": 0, "output_tokens": tokens, "total_tokens": tokens}
 }
 
 func jsonHeaders() http.Header {

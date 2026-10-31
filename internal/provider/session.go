@@ -42,6 +42,7 @@ type TurnEvent struct {
 	ToolCustom    bool
 	ToolArgs      map[string]any
 	Tokens        int
+	Usage         tokenUsage
 	DoneReason    string
 	Err           error
 }
@@ -256,6 +257,7 @@ func handleServerMessage(message *pb.AgentServerMessage, blobs map[string][]byte
 				}
 			}
 			events <- TurnEvent{Type: "tool_call", ToolCallID: normalizeToolCallID(args.GetToolCallId()), ToolName: identity.Name, ToolNamespace: identity.Namespace, ToolCustom: identity.Custom, ToolArgs: decoded}
+			// shortcut: only deltas are available here until Cursor exposes per-step usage before external tool execution.
 			events <- TurnEvent{Type: "done", DoneReason: "tool_calls"}
 			return errTurnFinished
 		}
@@ -269,6 +271,13 @@ func handleServerMessage(message *pb.AgentServerMessage, blobs map[string][]byte
 		}
 		if delta := update.GetTokenDelta(); delta != nil {
 			events <- TurnEvent{Type: "usage", Tokens: int(delta.GetTokens())}
+		}
+		if ended := update.GetTurnEnded(); ended != nil {
+			usage, err := usageFromTurnEnded(ended)
+			if err != nil {
+				return err
+			}
+			events <- TurnEvent{Type: "usage", Usage: usage}
 		}
 	}
 	return nil
